@@ -37,8 +37,9 @@ async function structuredResponse<T>(name:string,schema:Record<string,unknown>,i
 
 function arrayBufferToBase64(buffer:ArrayBuffer){const bytes=new Uint8Array(buffer);let binary="";const chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,i+chunk));return btoa(binary)}
 
-export async function generateInterviewQuestions(input:{role:string;jd:string;interviewType:string;difficulty:string;resume?:{name:string;bytes:ArrayBuffer}}){
+export async function generateInterviewQuestions(input:{role:string;jd:string;interviewType:string;difficulty:string;resume?:{name:string;bytes:ArrayBuffer};resumeText?:string}){
   const content:Array<Record<string,unknown>>=[{type:"input_text",text:`目标岗位：${input.role}\n面试类型：${input.interviewType}\n难度：${input.difficulty}\n职位描述：\n${input.jd}`}];
+  if(input.resumeText)content.push({type:"input_text",text:`候选人简历（由 ResumePilot 导入）：\n${input.resumeText}`});
   if(input.resume)content.push({type:"input_file",filename:input.resume.name,file_data:`data:application/pdf;base64,${arrayBufferToBase64(input.resume.bytes)}`});
   return structuredResponse<{questions:string[]}>("interview_questions",{type:"object",additionalProperties:false,properties:{questions:{type:"array",minItems:4,maxItems:4,items:{type:"string"}}},required:["questions"]},"你是一位严格但友善的中文面试官。根据候选人简历与职位描述生成4道互不重复的问题，覆盖项目证据、岗位技能、技术取舍与协作场景。问题必须具体、可口头回答，不得捏造简历内容。",[{role:"user",content}]);
 }

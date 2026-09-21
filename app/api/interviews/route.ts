@@ -20,12 +20,15 @@ export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const file = form.get("file");
+    const resumeText = String(form.get("resumeText") ?? "").trim();
     const role = String(form.get("role") ?? "").trim();
     const jd = String(form.get("jobDescription") ?? "").trim();
     const interviewType = String(form.get("interviewType") ?? "综合面试");
     const difficulty = String(form.get("difficulty") ?? "中级");
-    if (!(file instanceof File) || file.type !== "application/pdf") throw new ApiError("请选择一份 PDF 简历。", 400);
-    if (file.size > 5 * 1024 * 1024) throw new ApiError("PDF 不能超过 5MB。", 400);
+    const hasPdf = file instanceof File && file.size > 0;
+    if (!hasPdf && resumeText.length < 20) throw new ApiError("请上传 PDF 简历，或从 ResumePilot 导入简历。", 400);
+    if (hasPdf && file.type !== "application/pdf") throw new ApiError("请选择一份 PDF 简历。", 400);
+    if (hasPdf && file.size > 5 * 1024 * 1024) throw new ApiError("PDF 不能超过 5MB。", 400);
     if (!role || jd.length < 20) throw new ApiError("请填写目标岗位和至少 20 字的职位描述。", 400);
 
     let questions = buildQuestions(role, jd);
@@ -34,7 +37,8 @@ export async function POST(request: Request) {
     try {
       const generated = await generateInterviewQuestions({
         role, jd, interviewType, difficulty,
-        resume: { name: file.name, bytes: await file.arrayBuffer() },
+        resume: hasPdf ? { name: file.name, bytes: await file.arrayBuffer() } : undefined,
+        resumeText: resumeText || undefined,
       });
       questions = generated.data.questions;
       aiStatus = "generated";
