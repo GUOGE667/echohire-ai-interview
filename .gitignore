@@ -51,7 +51,8 @@ next-env.d.ts
 /work/
 
 # legacy Sites/Vinext starter files kept locally for recovery
-/.openai/
+/.openai/*
+!/.openai/hosting.json
 /.sites-runtime/
 /.vinext/
 /.wrangler/
