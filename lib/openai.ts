@@ -1,3 +1,10 @@
+export type AgentTraceStep = {
+  tool:string;
+  title:string;
+  summary:string;
+  status:"completed"|"fallback";
+};
+
 export type InterviewAnalysis = {
   source: "ai" | "fallback";
   headline: string;
@@ -8,6 +15,7 @@ export type InterviewAnalysis = {
   improvements: string[];
   actionPlan: string[];
   questionFeedback: Array<{ questionIndex:number; score:number; feedback:string; betterAnswer:string }>;
+  agentTrace: AgentTraceStep[];
 };
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
@@ -18,18 +26,31 @@ function outputText(payload: unknown) {
   return response.output?.flatMap(item=>item.content??[]).find(item=>item.type==="output_text")?.text ?? "";
 }
 
-async function structuredResponse<T>(name:string,schema:Record<string,unknown>,instructions:string,input:Array<Record<string,unknown>>):Promise<{data:T;model:string}> {
+type OpenAIResponse = {
+  output_text?:string;
+  output?:Array<Record<string,unknown>>;
+};
+
+async function createResponse(body:Record<string,unknown>):Promise<OpenAIResponse>{
   const apiKey=process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY_UNAVAILABLE");
-  const model=process.env.OPENAI_MODEL||DEFAULT_MODEL;
+  if(!apiKey)throw new Error("OPENAI_API_KEY_UNAVAILABLE");
   const response=await fetch("https://api.openai.com/v1/responses",{
     method:"POST",
     headers:{"authorization":`Bearer ${apiKey}`,"content-type":"application/json"},
-    body:JSON.stringify({model,store:false,instructions,input,text:{format:{type:"json_schema",name,strict:true,schema}},max_output_tokens:2200}),
+    body:JSON.stringify(body),
     signal:AbortSignal.timeout(45000),
   });
-  if(!response.ok){const detail=await response.text();console.error("OpenAI response error",response.status,detail.slice(0,500));throw new Error(`OPENAI_API_${response.status}`)}
-  const payload=await response.json();
+  if(!response.ok){
+    const detail=await response.text();
+    console.error("OpenAI response error",response.status,detail.slice(0,500));
+    throw new Error(`OPENAI_API_${response.status}`);
+  }
+  return response.json() as Promise<OpenAIResponse>;
+}
+
+async function structuredResponse<T>(name:string,schema:Record<string,unknown>,instructions:string,input:Array<Record<string,unknown>>):Promise<{data:T;model:string}> {
+  const model=process.env.OPENAI_MODEL||DEFAULT_MODEL;
+  const payload=await createResponse({model,store:false,instructions,input,text:{format:{type:"json_schema",name,strict:true,schema}},max_output_tokens:2200});
   const text=outputText(payload);
   if(!text)throw new Error("OPENAI_EMPTY_OUTPUT");
   return {data:JSON.parse(text) as T,model};
@@ -48,8 +69,36 @@ export async function analyzeInterview(input:{role:string;jd:string;questions:st
   const pairs=input.questions.map((question,index)=>({question,answer:input.answers[index]||"未回答"}));
   const dimension={type:"object",additionalProperties:false,properties:{relevance:{type:"integer",minimum:0,maximum:100},structure:{type:"integer",minimum:0,maximum:100},depth:{type:"integer",minimum:0,maximum:100},evidence:{type:"integer",minimum:0,maximum:100},clarity:{type:"integer",minimum:0,maximum:100}},required:["relevance","structure","depth","evidence","clarity"]};
    const schema={type:"object",additionalProperties:false,properties:{headline:{type:"string"},summary:{type:"string"},overallScore:{type:"integer",minimum:0,maximum:100},dimensions:dimension,strengths:{type:"array",minItems:2,maxItems:2,items:{type:"string"}},improvements:{type:"array",minItems:3,maxItems:3,items:{type:"string"}},actionPlan:{type:"array",minItems:3,maxItems:3,items:{type:"string"}},questionFeedback:{type:"array",minItems:pairs.length,maxItems:pairs.length,items:{type:"object",additionalProperties:false,properties:{questionIndex:{type:"integer"},score:{type:"integer",minimum:0,maximum:100},feedback:{type:"string"},betterAnswer:{type:"string"}},required:["questionIndex","score","feedback","betterAnswer"]}}},required:["headline","summary","overallScore","dimensions","strengths","improvements","actionPlan","questionFeedback"]};
-  const result=await structuredResponse<Omit<InterviewAnalysis,"source">>("interview_analysis",schema,"你是一位专业、具体且友善的中文求职教练。严格依据岗位描述和候选人的实际回答评分。逐题检查岗位相关性、STAR结构、个人行动、专业深度、方案取舍、量化证据与表达清晰度。每题反馈必须先概括或引用该回答中的至少一个具体信息，再指出最值得补充的一到两个要素；不得只因字数少就判定回答差，也不要在不同题目中重复同一句建议。优化方向必须具体可执行，不得虚构候选人未提供的经历或数据。",[{role:"user",content:[{type:"input_text",text:`目标岗位：${input.role}\n职位描述：\n${input.jd}\n\n问答记录：\n${JSON.stringify(pairs)}`}]}]);
-  return {data:{...result.data,source:"ai" as const},model:result.model};
+  const model=process.env.OPENAI_MODEL||DEFAULT_MODEL;
+  const tool={
+    type:"function",
+    name:"inspect_interview_context",
+    description:"分析岗位要求和候选人回答中的背景、个人行动、技术取舍、协作、结果、量化证据与复盘信号。生成面试报告前必须调用。",
+    strict:true,
+    parameters:{type:"object",properties:{},required:[],additionalProperties:false},
+  };
+  const instructions="你是 EchoHire 的面试教练 Agent。先调用 inspect_interview_context 获取可验证的岗位与回答信号，再依据工具结果生成报告。每题反馈必须概括回答中的具体信息，指出最值得补充的一到两个要素；不得仅根据字数评分，不得虚构经历或数据，也不要在不同题目中重复同一句建议。";
+  const initialInput:Array<Record<string,unknown>>=[{role:"user",content:[{type:"input_text",text:`目标岗位：${input.role}\n职位描述：\n${input.jd}\n\n问答记录：\n${JSON.stringify(pairs)}`}]}];
+  const planning=await createResponse({model,store:false,instructions,input:initialInput,tools:[tool],tool_choice:{type:"function",name:"inspect_interview_context"},parallel_tool_calls:false,max_output_tokens:700});
+  const calls=(planning.output??[]).filter(item=>item.type==="function_call"&&item.name==="inspect_interview_context") as Array<Record<string,unknown>&{call_id:string}>;
+  if(!calls.length)throw new Error("OPENAI_AGENT_TOOL_NOT_CALLED");
+  const inspected=inspectInterviewContext(input);
+  const toolOutputs=calls.map(call=>({type:"function_call_output",call_id:call.call_id,output:JSON.stringify(inspected)}));
+  const completed=await createResponse({
+    model,store:false,instructions,
+    input:[...initialInput,...(planning.output??[]),...toolOutputs],
+    tools:[tool],tool_choice:"none",
+    text:{format:{type:"json_schema",name:"interview_analysis",strict:true,schema}},
+    max_output_tokens:2200,
+  });
+  const text=outputText(completed);
+  if(!text)throw new Error("OPENAI_EMPTY_OUTPUT");
+  const data=JSON.parse(text) as Omit<InterviewAnalysis,"source"|"agentTrace">;
+  const agentTrace:AgentTraceStep[]=[
+    {tool:"inspect_interview_context",title:"检查岗位与回答证据",summary:`已检查 ${pairs.length} 道回答，识别岗位重点与可验证内容。`,status:"completed"},
+    {tool:"generate_coaching_report",title:"生成个性化教练报告",summary:"结合工具结果完成五维评分、逐题建议和下一轮行动计划。",status:"completed"},
+  ];
+  return {data:{...data,source:"ai" as const,agentTrace},model};
 }
 
 type AnswerSignals = {
@@ -95,6 +144,40 @@ function questionIntent(question:string){
   if(/复盘|不如预期|失败|教训|改进/.test(question))return "reflection" as const;
   if(/技术|方案|取舍|复杂问题|实现/.test(question))return "technical" as const;
   return "project" as const;
+}
+
+function jobFocus(jd:string){
+  const known=["React","Vue","Next.js","TypeScript","JavaScript","Python","Java","SQL","数据分析","机器学习","大模型","Agent","沟通","协作","产品","性能","安全","测试","部署"];
+  const lower=jd.toLowerCase();
+  const matched=known.filter(item=>lower.includes(item.toLowerCase()));
+  const technical=jd.match(/[A-Za-z][A-Za-z0-9.+#/-]{1,24}/g)??[];
+  return Array.from(new Set([...matched,...technical])).slice(0,10);
+}
+
+function inspectInterviewContext(input:{role:string;jd:string;questions:string[];answers:string[]}){
+  return {
+    role:input.role,
+    jobFocus:jobFocus(input.jd),
+    answeredCount:input.answers.filter(answer=>answer.trim()).length,
+    questions:input.questions.map((question,index)=>{
+      const signals=inspectAnswer(input.answers[index]||"");
+      return {
+        questionIndex:index,
+        intent:questionIntent(question),
+        answerExcerpt:answerExcerpt(signals.text),
+        signals:{
+          context:signals.context,
+          action:signals.action,
+          ownership:signals.ownership,
+          tradeoff:signals.tradeoff,
+          collaboration:signals.collaboration,
+          result:signals.result,
+          evidence:signals.evidence,
+          reflection:signals.reflection,
+        },
+      };
+    }),
+  };
 }
 
 function answerExcerpt(text:string){
@@ -208,5 +291,9 @@ export function fallbackAnalysis(questions:string[],answers:string[]):InterviewA
       "用“场景—任务—行动—结果—复盘”录制一版两分钟口述",
     ],
     questionFeedback,
+    agentTrace:[
+      {tool:"inspect_interview_context",title:"检查岗位与回答证据",summary:`已在本地检查 ${questions.length} 道回答的结构、行动、结果和证据信号。`,status:"fallback"},
+      {tool:"generate_rule_based_report",title:"生成可靠备用报告",summary:"AI 暂时不可用，已使用内容规则生成逐题建议，训练流程未中断。",status:"fallback"},
+    ],
   };
 }

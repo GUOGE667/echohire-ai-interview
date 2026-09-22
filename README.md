@@ -2,13 +2,15 @@
 
 一款面向求职者的 AI 个性化模拟面试平台。用户上传 PDF 简历并粘贴目标岗位 JD 后，EchoHire 会生成与个人经历和岗位要求相关的面试问题，在答题结束后提供评分、能力维度分析和可执行的改进建议。
 
-**在线体验：** [EchoHire Preview](https://zuo-qlpwfhq5a-guolinghao6-6415.vercel.app)
+**在线体验：** [EchoHire](https://echohire-ai-interview.guolinghao6.chatgpt.site)
 
 ## 功能亮点
 
 - 根据简历、岗位 JD、面试类型和难度生成 4 道定制问题
 - 从岗位相关性、回答结构、专业深度、证据和表达清晰度进行分析
 - 提供逐题反馈、优化方向和下一阶段训练计划
+- 使用函数工具先检查岗位与回答证据，再由教练 Agent 生成结构化报告
+- 在报告页展示 Agent 执行轨迹，便于理解报告来源和降级状态
 - 使用浏览器本地存储保留面试历史和训练进度
 - OpenAI API Key 仅在服务端使用，不会发送到浏览器
 - AI 暂时不可用时仍会按回答内容识别行动、取舍、协作、结果与证据，生成逐题差异化建议
@@ -27,8 +29,8 @@
 - Next.js 16（App Router）
 - React 19 + TypeScript
 - Tailwind CSS 4
-- OpenAI Responses API + Structured Outputs
-- Vercel Functions + Vercel Environment Variables
+- OpenAI Responses API + Function Calling + Structured Outputs
+- Cloudflare Workers / OpenAI Sites + Secret Environment Variables
 - Browser Local Storage
 
 ## 系统结构
@@ -43,10 +45,10 @@ Browser
 Next.js Route Handlers
   ├─ input validation
   ├─ fallback generation and analysis
-  └─ OpenAI Responses API
-          │
-          ▼
-Structured questions and interview report
+  └─ EchoHire Coaching Agent
+          ├─ inspect_interview_context tool
+          ├─ role / answer evidence signals
+          └─ structured coaching report
 ```
 
 ## 本地运行
@@ -94,12 +96,9 @@ pnpm start      # 启动生产构建
 - OpenAI 请求使用 `store: false`。
 - 部署时应通过托管平台的 Secret/Environment Variables 配置密钥。
 
-## 部署到 Vercel
+## 部署
 
-1. 将仓库导入 Vercel。
-2. 在项目的 Environment Variables 中添加 `OPENAI_API_KEY`。
-3. 将变量类型设为 Secret，并选择 Preview 或 Production 环境。
-4. 触发一次新的部署。
+生产站点部署在 OpenAI Sites。`OPENAI_API_KEY` 仅作为生产环境 Secret 保存，不写入源码或部署配置文件。
 
 ## 后续计划
 
