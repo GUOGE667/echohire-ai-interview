@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `skill_evidence_interview_skill_unique` ON `skill_evidence` (`interview_id`,`skill_key`);

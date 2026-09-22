@@ -1,5 +1,22 @@
-import { ApiError, errorResponse } from "../_lib";
+import { tryGetD1 } from "../../../db/runtime";
+import { getSiteUser } from "../../../lib/identity";
+import {
+  createInterview as persistInterview,
+  ensureUser,
+  getInterview,
+  listInterviews,
+  saveInterviewProgress,
+  saveSkillMemory,
+  type StoredInterview,
+} from "../../../lib/interview-memory";
 import { analyzeInterview, fallbackAnalysis, generateInterviewQuestions } from "../../../lib/openai";
+import { ApiError, errorResponse } from "../_lib";
+
+function requireUser(request: Request) {
+  const user = getSiteUser(request);
+  if (!user) throw new ApiError("请先登录后再使用面试训练。", 401);
+  return user;
+}
 
 function buildQuestions(role: string, jd: string) {
   const text = jd.toLowerCase();
@@ -12,12 +29,21 @@ function buildQuestions(role: string, jd: string) {
   ];
 }
 
-export async function GET() {
-  return Response.json({ interviews: [] });
+export async function GET(request: Request) {
+  try {
+    const user = requireUser(request);
+    const db = await tryGetD1();
+    if (!db) return Response.json({ interviews: [], storage: "local" });
+    await ensureUser(db, user);
+    return Response.json({ interviews: await listInterviews(db, user.userId), storage: "cloud" });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {
   try {
+    const user = requireUser(request);
     const form = await request.formData();
     const file = form.get("file");
     const resumeText = String(form.get("resumeText") ?? "").trim();
@@ -46,37 +72,61 @@ export async function POST(request: Request) {
     } catch (error) {
       console.warn("AI question generation fallback", error instanceof Error ? error.message : error);
     }
+
     const now = new Date().toISOString();
-    return Response.json({
-      interview: {
-        id: crypto.randomUUID(), role, jobDescription: jd, interviewType, difficulty,
-        status: "in_progress", questions, answers: [], analysis: null,
-        aiStatus, aiModel, score: null, createdAt: now, updatedAt: now,
-      },
-    }, { status: 201 });
-  } catch (error) { return errorResponse(error); }
+    const interview: StoredInterview = {
+      id: crypto.randomUUID(), role, jobDescription: jd, interviewType, difficulty,
+      status: "in_progress", questions, answers: [], analysis: null,
+      aiStatus, aiModel, score: null, createdAt: now, updatedAt: now,
+    };
+    const db = await tryGetD1();
+    if (db) {
+      await ensureUser(db, user);
+      await persistInterview(db, user.userId, interview);
+    }
+    return Response.json({ interview, storage: db ? "cloud" : "local" }, { status: 201 });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function PATCH(request: Request) {
   try {
+    const user = requireUser(request);
     const body = await request.json() as {
-      role?: string; jobDescription?: string; questions?: string[]; answers?: string[]; complete?: boolean;
+      id?: string; role?: string; jobDescription?: string; questions?: string[];
+      answers?: string[]; complete?: boolean;
     };
-    if (!body.role || !body.jobDescription || !Array.isArray(body.questions) || !Array.isArray(body.answers)) {
-      throw new ApiError("面试记录格式无效。", 400);
+    if (!body.id || !Array.isArray(body.answers)) throw new ApiError("面试记录格式无效。", 400);
+
+    const db = await tryGetD1();
+    const stored = db ? await getInterview(db, user.userId, body.id) : null;
+    const role = stored?.role || body.role;
+    const jd = stored?.jobDescription || body.jobDescription;
+    const questions = stored?.questions || body.questions;
+    if (!role || !jd || !Array.isArray(questions)) throw new ApiError("没有找到这场面试。", 404);
+
+    if (!body.complete) {
+      if (db) await saveInterviewProgress(db, user.userId, body.id, body.answers, false, null, stored?.aiStatus || "generated");
+      return Response.json({ saved: true, score: null, analysis: null, aiStatus: stored?.aiStatus || "generated", storage: db ? "cloud" : "local" });
     }
-    if (!body.complete) return Response.json({ saved: true, score: null, analysis: null, aiStatus: "generated" });
 
     let analysis;
     let aiStatus = "analyzed";
     try {
-      const result = await analyzeInterview({ role: body.role, jd: body.jobDescription, questions: body.questions, answers: body.answers });
+      const result = await analyzeInterview({ role, jd, questions, answers: body.answers });
       analysis = result.data;
     } catch (error) {
       console.warn("AI analysis fallback", error instanceof Error ? error.message : error);
-      analysis = fallbackAnalysis(body.questions, body.answers);
+      analysis = fallbackAnalysis(questions, body.answers);
       aiStatus = "fallback";
     }
-    return Response.json({ saved: true, score: analysis.overallScore, analysis, aiStatus });
-  } catch (error) { return errorResponse(error); }
+    if (db) {
+      await saveInterviewProgress(db, user.userId, body.id, body.answers, true, analysis, aiStatus);
+      await saveSkillMemory(db, user.userId, body.id, analysis);
+    }
+    return Response.json({ saved: true, score: analysis.overallScore, analysis, aiStatus, storage: db ? "cloud" : "local" });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
