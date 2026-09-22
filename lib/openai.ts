@@ -48,11 +48,165 @@ export async function analyzeInterview(input:{role:string;jd:string;questions:st
   const pairs=input.questions.map((question,index)=>({question,answer:input.answers[index]||"未回答"}));
   const dimension={type:"object",additionalProperties:false,properties:{relevance:{type:"integer",minimum:0,maximum:100},structure:{type:"integer",minimum:0,maximum:100},depth:{type:"integer",minimum:0,maximum:100},evidence:{type:"integer",minimum:0,maximum:100},clarity:{type:"integer",minimum:0,maximum:100}},required:["relevance","structure","depth","evidence","clarity"]};
    const schema={type:"object",additionalProperties:false,properties:{headline:{type:"string"},summary:{type:"string"},overallScore:{type:"integer",minimum:0,maximum:100},dimensions:dimension,strengths:{type:"array",minItems:2,maxItems:2,items:{type:"string"}},improvements:{type:"array",minItems:3,maxItems:3,items:{type:"string"}},actionPlan:{type:"array",minItems:3,maxItems:3,items:{type:"string"}},questionFeedback:{type:"array",minItems:pairs.length,maxItems:pairs.length,items:{type:"object",additionalProperties:false,properties:{questionIndex:{type:"integer"},score:{type:"integer",minimum:0,maximum:100},feedback:{type:"string"},betterAnswer:{type:"string"}},required:["questionIndex","score","feedback","betterAnswer"]}}},required:["headline","summary","overallScore","dimensions","strengths","improvements","actionPlan","questionFeedback"]};
-  const result=await structuredResponse<Omit<InterviewAnalysis,"source">>("interview_analysis",schema,"你是一位专业的中文求职教练。严格依据岗位描述和候选人的实际回答评分。逐题检查岗位相关性、STAR结构、专业深度、量化证据与表达清晰度；建议必须具体可执行，优化示例不得虚构候选人未提供的经历或数据。",[{role:"user",content:[{type:"input_text",text:`目标岗位：${input.role}\n职位描述：\n${input.jd}\n\n问答记录：\n${JSON.stringify(pairs)}`}]}]);
+  const result=await structuredResponse<Omit<InterviewAnalysis,"source">>("interview_analysis",schema,"你是一位专业、具体且友善的中文求职教练。严格依据岗位描述和候选人的实际回答评分。逐题检查岗位相关性、STAR结构、个人行动、专业深度、方案取舍、量化证据与表达清晰度。每题反馈必须先概括或引用该回答中的至少一个具体信息，再指出最值得补充的一到两个要素；不得只因字数少就判定回答差，也不要在不同题目中重复同一句建议。优化方向必须具体可执行，不得虚构候选人未提供的经历或数据。",[{role:"user",content:[{type:"input_text",text:`目标岗位：${input.role}\n职位描述：\n${input.jd}\n\n问答记录：\n${JSON.stringify(pairs)}`}]}]);
   return {data:{...result.data,source:"ai" as const},model:result.model};
 }
 
+type AnswerSignals = {
+  text:string;
+  context:boolean;
+  action:boolean;
+  result:boolean;
+  evidence:boolean;
+  ownership:boolean;
+  tradeoff:boolean;
+  collaboration:boolean;
+  reflection:boolean;
+};
+
+const signalPatterns = {
+  context: /当时|背景|场景|项目中|团队|需求|目标|负责|遇到|面临|为了/,
+  action: /我(?:先|负责|通过|采用|选择|设计|实现|分析|推动|协调|优化|拆分|排查|制定|搭建|完成|增加|调整|验证|测试)|具体|步骤|方案/,
+  result: /最终|结果|因此|从而|上线|交付|完成|解决|达成|提升|降低|减少|增加|改善|获得/,
+  evidence: /\d+(?:\.\d+)?\s*(?:%|个|人|名|次|倍|毫秒|秒|分钟|小时|天|周|月|条|项|家|万|千)?|百分之[一二三四五六七八九十百]+|从.{1,20}(?:到|至).{1,20}/,
+  ownership: /我(?:负责|主导|提出|设计|实现|推动|增加|调整|采用|选择|协调|组织|完成)|我的职责|由我|个人负责/,
+  tradeoff: /取舍|权衡|相比|对比|原因|因为|考虑到|选择.+而不是|优缺点|成本/,
+  collaboration: /协作|沟通|同步|对齐|产品|设计|工程|前端|后端|测试|同学|成员|团队|评审/,
+  reflection: /复盘|反思|学到|教训|改进|下一次|如果重来|后来我|不足|避免再次/,
+};
+
+function inspectAnswer(raw:string):AnswerSignals{
+  const text=raw.trim();
+  return {
+    text,
+    context:signalPatterns.context.test(text),
+    action:signalPatterns.action.test(text),
+    result:signalPatterns.result.test(text),
+    evidence:signalPatterns.evidence.test(text),
+    ownership:signalPatterns.ownership.test(text),
+    tradeoff:signalPatterns.tradeoff.test(text),
+    collaboration:signalPatterns.collaboration.test(text),
+    reflection:signalPatterns.reflection.test(text),
+  };
+}
+
+function questionIntent(question:string){
+  if(/协作|沟通|产品|设计|团队|冲突|推进/.test(question))return "collaboration" as const;
+  if(/复盘|不如预期|失败|教训|改进/.test(question))return "reflection" as const;
+  if(/技术|方案|取舍|复杂问题|实现/.test(question))return "technical" as const;
+  return "project" as const;
+}
+
+function answerExcerpt(text:string){
+  const compact=text.replace(/\s+/g," ").replace(/[。！？；][\s\S]*$/,"").trim();
+  if(!compact)return "";
+  return compact.length>34?`${compact.slice(0,34)}…`:compact;
+}
+
+function scoreAnswer(signals:AnswerSignals,intent:ReturnType<typeof questionIntent>){
+  if(!signals.text)return 35;
+  let score=48;
+  score+=signals.context?6:0;
+  score+=signals.action?10:0;
+  score+=signals.ownership?6:0;
+  score+=signals.result?9:0;
+  score+=signals.evidence?8:0;
+  score+=signals.tradeoff?6:0;
+  if(intent==="collaboration")score+=signals.collaboration?8:-4;
+  if(intent==="reflection")score+=signals.reflection?8:-4;
+  if(intent==="technical")score+=signals.tradeoff?4:-3;
+  if(intent==="project")score+=signals.result?3:0;
+  score+=signals.text.length>=45?3:signals.text.length>=20?1:0;
+  return Math.max(35,Math.min(94,score));
+}
+
+function feedbackFor(question:string,signals:AnswerSignals){
+  const intent=questionIntent(question);
+  const excerpt=answerExcerpt(signals.text);
+  if(!signals.text)return {
+    score:35,
+    feedback:"这道题目前没有有效回答。先写出一个真实案例，再补充你本人采取的行动和最终结果。",
+    betterAnswer:"先用一句话说明当时的场景与目标，再依次回答“我做了什么—为什么这样做—产生了什么结果”。",
+  };
+
+  const strengths:string[]=[];
+  if(signals.action)strengths.push("说明了具体行动");
+  if(signals.ownership)strengths.push("个人职责比较清楚");
+  if(signals.tradeoff)strengths.push("交代了选择依据或取舍");
+  if(signals.evidence)strengths.push("提供了数据或可验证证据");
+  if(intent==="collaboration"&&signals.collaboration)strengths.push("覆盖了协作过程");
+  if(intent==="reflection"&&signals.reflection)strengths.push("给出了复盘和改进");
+  if(signals.result)strengths.push("回答包含最终结果");
+
+  const missing:string[]=[];
+  if(!signals.action)missing.push("你本人采取的关键行动");
+  if(!signals.ownership)missing.push("你在其中承担的职责");
+  if(intent==="technical"&&!signals.tradeoff)missing.push("为什么选择该方案以及放弃了什么方案");
+  if(intent==="collaboration"&&!signals.collaboration)missing.push("你如何与相关角色对齐并推进");
+  if(intent==="reflection"&&!signals.reflection)missing.push("复盘后的具体改进");
+  if(!signals.result)missing.push("行动带来的最终结果");
+  if(!signals.evidence)missing.push("能够验证结果的数据或事实");
+
+  const opening=strengths.length
+    ? `你提到“${excerpt}”，并且${strengths.slice(0,2).join("、")}。`
+    : `你已经围绕“${excerpt}”给出了真实信息。`;
+  const next=missing.length
+    ? `下一步重点补充${missing.slice(0,2).join("，以及")}。`
+    : "内容要素已经较完整，可以进一步压缩铺垫，让关键行动和结果更靠前。";
+  const structureHint=!signals.context
+    ? "先用一句话补齐场景和目标，"
+    : "保留现有背景，";
+  const detailHint=missing.length
+    ? `重点写清${missing.slice(0,2).join("和")}。`
+    : "把最能证明能力的行动与结果放在前两句。";
+  return {score:scoreAnswer(signals,intent),feedback:`${opening}${next}`,betterAnswer:`保留你提到的“${excerpt}”；${structureHint}${detailHint}`};
+}
+
 export function fallbackAnalysis(questions:string[],answers:string[]):InterviewAnalysis{
-  const lengths=answers.map(answer=>answer.trim().length);const average=lengths.reduce((a,b)=>a+b,0)/Math.max(1,lengths.length);const evidence=answers.filter(answer=>/\d|%|秒|分钟|用户|性能|提升|降低/.test(answer)).length;const score=Math.max(58,Math.min(82,Math.round(60+Math.min(12,average/18)+evidence*2)));
-  return {source:"fallback",headline:"回答已保存，AI 深度分析暂未启用。",summary:"系统已完成基础完整度与证据检查；启用 AI 后会自动生成语义级逐题点评。",overallScore:score,dimensions:{relevance:score+2,structure:score-2,depth:score,evidence:Math.max(50,score-7),clarity:score+3},strengths:["完整回答了本场面试问题","回答内容已形成可持续复盘的训练档案"],improvements:["用 STAR 结构明确背景、任务、行动和结果","为关键结果补充可验证的量化指标","说明个人职责以及方案取舍"],actionPlan:["挑选一个项目补齐前后对比数据","把最长回答压缩成两分钟版本","再次练习最薄弱的一道题"],questionFeedback:questions.map((_,index)=>({questionIndex:index,score:Math.max(55,Math.min(85,score+(lengths[index]>120?3:-3))),feedback:lengths[index]>120?"信息较完整，下一步突出技术取舍和结果证据。":"回答偏短，建议补充具体行动、技术取舍与结果。",betterAnswer:"按“背景—目标—具体行动—量化结果—复盘”重新组织，并只使用你的真实经历和数据。"}))};
+  const signals=questions.map((_,index)=>inspectAnswer(answers[index]||""));
+  const questionFeedback=questions.map((question,index)=>({questionIndex:index,...feedbackFor(question,signals[index])}));
+  const overallScore=Math.round(questionFeedback.reduce((sum,item)=>sum+item.score,0)/Math.max(1,questionFeedback.length));
+  const count=(key:keyof Omit<AnswerSignals,"text">)=>signals.filter(item=>item[key]).length;
+  const total=Math.max(1,questions.length);
+  const actionCount=count("action");
+  const resultCount=count("result");
+  const evidenceCount=count("evidence");
+  const ownershipCount=count("ownership");
+  const tradeoffCount=count("tradeoff");
+  const contextCount=count("context");
+  const answered=signals.filter(item=>item.text).length;
+  const strengths=[
+    actionCount>=Math.ceil(total/2)?"多数回答已经包含具体行动，能够看出解决问题的过程":"已经提供了可继续打磨的真实经历和信息",
+    evidenceCount>=Math.ceil(total/2)?"多道回答包含数据或可验证事实，可信度较好":resultCount>=Math.ceil(total/2)?"多数回答交代了事情的最终结果":"完整保留了本轮问答，便于逐题复盘",
+  ];
+  const improvementCandidates=[
+    {missing:total-actionCount,text:"把泛泛描述改成你本人采取的关键行动"},
+    {missing:total-ownershipCount,text:"明确你在项目中的职责和实际贡献"},
+    {missing:total-resultCount,text:"补充行动后的结果，形成完整闭环"},
+    {missing:total-evidenceCount,text:"为结果增加可验证的数据、范围或前后对比"},
+    {missing:total-tradeoffCount,text:"解释方案选择依据、限制条件和技术取舍"},
+  ].sort((a,b)=>b.missing-a.missing);
+  const improvements=improvementCandidates.slice(0,3).map(item=>item.text);
+  const weakest=questionFeedback.reduce((lowest,item)=>item.score<lowest.score?item:lowest,questionFeedback[0]||{questionIndex:0,score:0});
+  return {
+    source:"fallback",
+    headline:"已根据每道回答生成针对性改进建议。",
+    summary:`本次完成 ${answered}/${questions.length} 道回答；报告按内容检查了背景、个人行动、方案取舍、结果证据与复盘，而不是仅依据回答长度。`,
+    overallScore,
+    dimensions:{
+      relevance:Math.max(40,Math.min(96,Math.round(overallScore+(answered===questions.length?4:0)))),
+      structure:Math.max(35,Math.min(96,Math.round(42+(contextCount+actionCount+resultCount)/total*18))),
+      depth:Math.max(35,Math.min(96,Math.round(44+(actionCount+tradeoffCount+ownershipCount)/total*17))),
+      evidence:Math.max(35,Math.min(96,Math.round(40+(resultCount+evidenceCount)/total*24))),
+      clarity:Math.max(40,Math.min(96,Math.round(overallScore+2))),
+    },
+    strengths,
+    improvements,
+    actionPlan:[
+      `先重答第 ${weakest.questionIndex+1} 题，只补齐报告指出的缺失要素`,
+      evidenceCount<total?"为至少两道回答加入真实数据或可验证结果":"把已有数据放到结果句中，突出前后变化",
+      "用“场景—任务—行动—结果—复盘”录制一版两分钟口述",
+    ],
+    questionFeedback,
+  };
 }
