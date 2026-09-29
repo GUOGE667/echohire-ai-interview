@@ -26,6 +26,7 @@ import {
 
 type View =
   | "dashboard"
+  | "career"
   | "setup"
   | "interview"
   | "report"
@@ -100,6 +101,7 @@ type ResumeHandoff = {
 };
 const navItems = [
   { label: "概览", icon: Home, view: "dashboard" as View },
+  { label: "职业路线", icon: Target, view: "career" as View },
   { label: "开始面试", icon: Mic2, view: "setup" as View },
   { label: "历史记录", icon: History, view: "history" as View },
   { label: "能力分析", icon: BarChart3, view: "analytics" as View },
@@ -131,6 +133,7 @@ export default function HomePage() {
     const hash = window.location.hash.replace("#", "").split("?")[0] as View;
     return [
       "dashboard",
+      "career",
       "setup",
       "interview",
       "report",
@@ -453,6 +456,14 @@ export default function HomePage() {
                   onOpen={openRecord}
                 />
               )}{" "}
+              {view === "career" && (
+                <CareerJourney
+                  records={records}
+                  profiles={profiles}
+                  onStart={() => go("setup")}
+                  onOpen={openRecord}
+                />
+              )}{" "}
               {view === "setup" && (
                 <Setup
                   step={step}
@@ -542,6 +553,101 @@ function Empty({
         <Plus size={16} />
         {action}
       </button>
+    </div>
+  );
+}
+
+function CareerJourney({
+  records,
+  profiles,
+  onStart,
+  onOpen,
+}: {
+  records: InterviewRecord[];
+  profiles: SkillProfile[];
+  onStart: () => void;
+  onOpen: (record: InterviewRecord) => void;
+}) {
+  const inProgress = records.find((record) => record.status === "in_progress");
+  const completed = records.find((record) => record.status === "completed");
+  const focus = profiles[0];
+  const nextTitle = inProgress
+    ? "先完成正在进行的面试"
+    : completed
+      ? "先看复盘，再修改简历"
+      : "先准备一份面向岗位的简历";
+  const nextDetail = inProgress
+    ? `「${inProgress.role}」已回答 ${inProgress.answers.length}/${inProgress.questions.length} 题，继续后才能生成完整复盘。`
+    : completed
+      ? completed.analysis?.improvements[0] || "回看最近一次面试，找出要补强的项目证据。"
+      : "在 ResumePilot 填写真实项目经历和目标岗位，再带着这份简历开始训练。";
+  const actionPlan = completed?.analysis?.actionPlan || [
+    "在 ResumePilot 完善一段与你的目标岗位相关的真实项目经历",
+    inProgress ? `完成「${inProgress.role}」剩余的面试题` : "用这份简历开始一场模拟面试",
+    "查看逐题复盘，再决定简历中最需要补充的证据",
+  ];
+
+  return (
+    <div className="flow-page career-page">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Career Agent · 求职训练路线</p>
+          <h1>下一步该做什么</h1>
+          <p className="header-note">根据已保存的面试进度和能力反馈更新；简历草稿仍由 ResumePilot 管理。</p>
+        </div>
+      </header>
+      <section className="career-lead">
+        <span className="label">当前优先事项</span>
+        <h2>{nextTitle}</h2>
+        <p>{nextDetail}</p>
+        {inProgress ? (
+          <button className="primary-button" onClick={() => onOpen(inProgress)}>继续面试 <ChevronRight size={16} /></button>
+        ) : completed ? (
+          <button className="primary-button" onClick={() => onOpen(completed)}>查看复盘 <ChevronRight size={16} /></button>
+        ) : (
+          <a className="primary-button" href={RESUME_PILOT_URL}>打开 ResumePilot <ChevronRight size={16} /></a>
+        )}
+      </section>
+      <div className="career-steps">
+        <article>
+          <span className="career-step-index">01</span>
+          <FileText size={22} />
+          <h2>简历准备</h2>
+          <p>编辑真实经历、目标岗位和职位要求，确定本轮训练要验证什么。</p>
+          <a href={RESUME_PILOT_URL}>前往 ResumePilot <ChevronRight size={16} /></a>
+        </article>
+        <article>
+          <span className="career-step-index">02</span>
+          <Mic2 size={22} />
+          <h2>模拟面试</h2>
+          <p>{inProgress ? `正在训练「${inProgress.role}」，进度已云端保存。` : completed ? `已完成 ${records.filter((record) => record.status === "completed").length} 场，可继续练习。` : "把简历带入 EchoHire，练习岗位问题并保存回答。"}</p>
+          <button onClick={inProgress ? () => onOpen(inProgress) : onStart}>{inProgress ? "继续当前面试" : "开始新面试"} <ChevronRight size={16} /></button>
+        </article>
+        <article>
+          <span className="career-step-index">03</span>
+          <Target size={22} />
+          <h2>复盘改进</h2>
+          <p>{completed?.analysis?.improvements[0] || "完成面试后，用逐题反馈和能力证据修改简历，再开启下一轮。"}</p>
+          {completed ? (
+            <button onClick={() => onOpen(completed)}>查看最近复盘 <ChevronRight size={16} /></button>
+          ) : (
+            <span className="career-step-waiting">完成面试后解锁</span>
+          )}
+        </article>
+      </div>
+      <section className="career-focus">
+        <div>
+          <span className="label">本轮重点</span>
+          <h2>{focus ? focus.label : "建立第一份能力画像"}</h2>
+          <p>{focus?.latestInsight || "完成一场面试后，这里会显示最值得先改进的能力与证据。"}</p>
+        </div>
+        <span>{focus ? `${focus.score} / 100` : "等待首场"}</span>
+      </section>
+      <section className="career-plan-list">
+        <span className="label">接下来三步</span>
+        <h2>{completed ? "根据最近一次复盘安排" : "完成首轮训练后会更新"}</h2>
+        <ol>{actionPlan.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ol>
+      </section>
     </div>
   );
 }
