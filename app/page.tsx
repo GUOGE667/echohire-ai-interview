@@ -175,9 +175,25 @@ export default function HomePage() {
             profiles: [],
           })),
         ]);
-        setRecords(
-          history.interviews.length ? history.interviews : localRecords,
-        );
+        const restoredRecords = history.interviews.length
+          ? history.interviews
+          : localRecords;
+        setRecords(restoredRecords);
+        if (window.location.hash.startsWith("#interview")) {
+          const query = window.location.hash.split("?")[1] || "";
+          const requestedId = new URLSearchParams(query).get("id");
+          const inProgress = restoredRecords.find(
+            (record) => record.id === requestedId && record.status === "in_progress",
+          ) || restoredRecords.find(
+            (record) => record.status === "in_progress",
+          );
+          if (inProgress) {
+            setActive(inProgress);
+            setQuestionIndex(
+              Math.min(inProgress.answers.length, inProgress.questions.length - 1),
+            );
+          }
+        }
         setProfiles(memory.profiles);
       })
       .catch((reason: Error) => setError(reason.message))
@@ -276,10 +292,12 @@ export default function HomePage() {
     return () => lifecycle.abort();
   }, []);
 
-  function go(next: View) {
+  function go(next: View, interviewId?: string) {
     setError("");
     setView(next);
-    location.hash = next;
+    location.hash = next === "interview" && interviewId
+      ? `interview?id=${encodeURIComponent(interviewId)}`
+      : next;
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function openRecord(record: InterviewRecord) {
@@ -287,7 +305,7 @@ export default function HomePage() {
     setQuestionIndex(
       Math.min(record.answers.length, record.questions.length - 1),
     );
-    go(record.status === "completed" ? "report" : "interview");
+    go(record.status === "completed" ? "report" : "interview", record.id);
   }
   async function createInterview() {
     if (!resumeFile && !resumeText) return;
@@ -309,7 +327,7 @@ export default function HomePage() {
       setRecords((items) => [result.interview, ...items]);
       setQuestionIndex(0);
       setAnswer("");
-      go("interview");
+      go("interview", result.interview.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "创建失败，请重试。");
     } finally {
