@@ -343,6 +343,7 @@ export default function HomePage() {
     const complete = questionIndex === active.questions.length - 1;
     try {
       const saved = await api<{
+        questions: string[];
         score: number | null;
         analysis: Analysis | null;
         aiStatus: string;
@@ -360,6 +361,7 @@ export default function HomePage() {
       });
       const updated = {
         ...active,
+        questions: saved.questions,
         answers,
         status: complete ? "completed" : "in_progress",
         score: saved.score,

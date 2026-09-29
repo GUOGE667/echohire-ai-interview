@@ -113,6 +113,7 @@ export async function saveInterviewProgress(
   db: D1Database,
   userId: string,
   id: string,
+  questions: string[],
   answers: string[],
   completed: boolean,
   analysis: InterviewAnalysis | null,
@@ -121,10 +122,10 @@ export async function saveInterviewProgress(
   const now = new Date().toISOString();
   await db.prepare(`
     UPDATE interviews
-    SET answers_json = ?, status = ?, analysis_json = ?, ai_status = ?, score = ?, updated_at = ?
+    SET questions_json = ?, answers_json = ?, status = ?, analysis_json = ?, ai_status = ?, score = ?, updated_at = ?
     WHERE user_id = ? AND id = ?
   `).bind(
-    JSON.stringify(answers), completed ? "completed" : "in_progress",
+    JSON.stringify(questions), JSON.stringify(answers), completed ? "completed" : "in_progress",
     analysis ? JSON.stringify(analysis) : null, aiStatus,
     analysis?.overallScore ?? null, now, userId, id,
   ).run();
