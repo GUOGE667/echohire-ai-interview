@@ -61,6 +61,7 @@ next-env.d.ts
 /examples/
 /hooks/
 /tests/
+!/tests/
 /vendor/
 /worker/
 /app/chatgpt-auth.ts

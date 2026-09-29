@@ -12,7 +12,8 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "next start",
     "lint": "eslint app lib next.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
