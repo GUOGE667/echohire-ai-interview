@@ -13,7 +13,8 @@
     "start": "next start",
     "lint": "eslint app lib next.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.mjs"
+    "test": "node --experimental-strip-types --test tests/*.mjs",
+    "eval:offline": "node --experimental-strip-types evals/run-offline.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

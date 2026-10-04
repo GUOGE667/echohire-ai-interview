@@ -1,0 +1,133 @@
+{
+  "protocol": "fictional_author_labeled_holdout_v1",
+  "total": 40,
+  "exactCount": 35,
+  "exactAccuracy": 0.875,
+  "followUpDecisionAccuracy": 0.95,
+  "falseFollowUps": 0,
+  "missedFollowUps": 2,
+  "reportFocusHitCount": 26,
+  "reportFocusTotal": 32,
+  "reportQuoteFaithfulCount": 40,
+  "followUpQuoteFaithfulCount": 30,
+  "followUpQuoteTotal": 30,
+  "classMetrics": [
+    {
+      "label": "action",
+      "support": 8,
+      "predicted": 10,
+      "precision": 0.8,
+      "recall": 1,
+      "f1": 0.888888888888889
+    },
+    {
+      "label": "result",
+      "support": 8,
+      "predicted": 5,
+      "precision": 1,
+      "recall": 0.625,
+      "f1": 0.7692307692307693
+    },
+    {
+      "label": "evidence",
+      "support": 8,
+      "predicted": 7,
+      "precision": 0.8571428571428571,
+      "recall": 0.75,
+      "f1": 0.7999999999999999
+    },
+    {
+      "label": "tradeoff",
+      "support": 8,
+      "predicted": 8,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    {
+      "label": "none",
+      "support": 8,
+      "predicted": 10,
+      "precision": 0.8,
+      "recall": 1,
+      "f1": 0.888888888888889
+    }
+  ],
+  "confusion": {
+    "action": {
+      "action": 8,
+      "result": 0,
+      "evidence": 0,
+      "tradeoff": 0,
+      "none": 0,
+      "other": 0
+    },
+    "result": {
+      "action": 2,
+      "result": 5,
+      "evidence": 1,
+      "tradeoff": 0,
+      "none": 0,
+      "other": 0
+    },
+    "evidence": {
+      "action": 0,
+      "result": 0,
+      "evidence": 6,
+      "tradeoff": 0,
+      "none": 2,
+      "other": 0
+    },
+    "tradeoff": {
+      "action": 0,
+      "result": 0,
+      "evidence": 0,
+      "tradeoff": 8,
+      "none": 0,
+      "other": 0
+    },
+    "none": {
+      "action": 0,
+      "result": 0,
+      "evidence": 0,
+      "tradeoff": 0,
+      "none": 8,
+      "other": 0
+    }
+  },
+  "mismatches": [
+    {
+      "id": "R05",
+      "expected": "result",
+      "actual": "evidence"
+    },
+    {
+      "id": "R07",
+      "expected": "result",
+      "actual": "action"
+    },
+    {
+      "id": "R08",
+      "expected": "result",
+      "actual": "action"
+    },
+    {
+      "id": "E06",
+      "expected": "evidence",
+      "actual": "none"
+    },
+    {
+      "id": "E08",
+      "expected": "evidence",
+      "actual": "none"
+    }
+  ],
+  "reportFocusMissIds": [
+    "R06",
+    "R08",
+    "E05",
+    "E06",
+    "E08",
+    "T08"
+  ]
+}

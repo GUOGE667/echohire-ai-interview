@@ -4,6 +4,8 @@
 
 EchoHire 让求职者从简历和岗位描述出发，完成模拟面试、逐题追问、复盘与下一步训练规划。当前职业路线页根据已保存的面试与能力画像生成规则驱动的行动建议；它不是自主规划的 LLM Agent。
 
+**离线追问与报告评测：**40 条独立虚构案例，默认备用规则的追问类型与预设标签一致 35/40（87.5%）；暴露了英文行动描述和“数字不等于证据”等边界。详见[评测协议、混淆矩阵与错误分析](docs/OFFLINE_EVAL.md)。该结果不代表真实面试质量或在线模型效果，运行时不消耗 API 额度。
+
 ## 已实现
 
 - PDF 简历或 ResumePilot 文本导入，结合岗位 JD 创建四题面试；OpenAI 不可用时使用备用题目。
@@ -35,6 +37,7 @@ flowchart LR
 pnpm install
 pnpm dev
 pnpm test
+pnpm eval:offline
 pnpm lint
 pnpm build
 ```
