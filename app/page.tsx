@@ -128,21 +128,7 @@ function formatDate(value: string) {
 }
 
 export default function HomePage() {
-  const [view, setView] = useState<View>(() => {
-    if (typeof window === "undefined") return "dashboard";
-    const hash = window.location.hash.replace("#", "").split("?")[0] as View;
-    return [
-      "dashboard",
-      "career",
-      "setup",
-      "interview",
-      "report",
-      "history",
-      "analytics",
-    ].includes(hash)
-      ? hash
-      : "dashboard";
-  });
+  const [view, setView] = useState<View>("dashboard");
   const [step, setStep] = useState(1);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeText, setResumeText] = useState("");
@@ -162,8 +148,13 @@ export default function HomePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const hash = window.location.hash.replace("#", "").split("?")[0] as View;
+    const hasHandoff = window.location.hash.includes("handoff=");
     api<{ user: User; storage: "cloud" | "local" }>("/api/session")
       .then(async (session) => {
+        if (!hasHandoff && ["dashboard", "career", "setup", "interview", "report", "history", "analytics"].includes(hash)) {
+          setView(hash);
+        }
         setUser(session.user);
         setStorageMode(session.storage);
         const saved = localStorage.getItem("echohire-interviews");
@@ -227,6 +218,8 @@ export default function HomePage() {
         `项目经历：${resume.project || ""}｜${resume.projectRole || ""}\n${resume.projectDetail || ""}`,
         `专业技能：${resume.skills || ""}`,
       ].join("\n\n");
+      // The hash handoff is an external navigation event; initialize all imported fields together.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setResumeText(text);
       setRole(resume.title || "目标岗位");
       setJd(payload.jobDescription || "");

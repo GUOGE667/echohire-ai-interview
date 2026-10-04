@@ -6,6 +6,8 @@ EchoHire 让求职者从简历和岗位描述出发，完成模拟面试、逐�
 
 **离线追问与报告评测：**40 条独立虚构案例，默认备用规则的追问类型与预设标签一致 35/40（87.5%）；暴露了英文行动描述和“数字不等于证据”等边界。详见[评测协议、混淆矩阵与错误分析](docs/OFFLINE_EVAL.md)。该结果不代表真实面试质量或在线模型效果，运行时不消耗 API 额度。
 
+**浏览器回归：**Playwright 使用虚构简历和接口 mock，覆盖创建面试、逐题保存、刷新恢复与报告展示。测试清空 `OPENAI_API_KEY`，不会发起 OpenAI 请求；它验证页面流程，不验证真实模型或云端 D1。
+
 ## 已实现
 
 - PDF 简历或 ResumePilot 文本导入，结合岗位 JD 创建四题面试；OpenAI 不可用时使用备用题目。
@@ -38,11 +40,13 @@ pnpm install
 pnpm dev
 pnpm test
 pnpm eval:offline
+pnpm test:e2e
 pnpm lint
 pnpm build
 ```
 
 `pnpm test` 为离线确定性测试，不发起 OpenAI 请求。站点部署于 OpenAI Sites，机密只通过部署环境变量配置。
+`pnpm test:e2e` 需要本机安装 Chrome；Playwright 会启动本地服务并拦截全部 `/api/` 请求，也会阻止页面请求第三方域名。无需 API Key 或 Sites 登录。
 
 ## 边界
 
@@ -50,7 +54,7 @@ pnpm build
 - ResumePilot 草稿只在原浏览器保存，并非云端同步；EchoHire 的 D1 面试记录与此不同。
 - 托管配置预留了 R2 绑定，但当前上传流程没有写入 R2；不要将其表述为已实现的文件持久化。
 - 这是求职训练辅助工具，评分与建议不等于真实招聘判断。
-- 目前未完成完整的端到端浏览器回归、性能压测或真实用户效果评估。
+- 浏览器回归目前覆盖一条核心流程，尚未覆盖真实 D1、跨设备同步、性能压测或真实用户效果评估。
 
 ## License
 
