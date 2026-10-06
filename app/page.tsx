@@ -589,7 +589,7 @@ function CareerJourney({
       : "在 ResumePilot 填写真实项目经历和目标岗位，再带着这份简历开始训练。";
   const actionPlan = completed?.analysis?.actionPlan || [
     "在 ResumePilot 完善一段与你的目标岗位相关的真实项目经历",
-    inProgress ? `完成「${inProgress.role}」剩余的面试题` : "用这份简历开始一场模拟面试",
+    inProgress ? `完成「${inProgress.role}」剩余的面试题` : "围绕目标岗位开始一场模拟面试",
     "查看逐题复盘，再决定简历中最需要补充的证据",
   ];
 
@@ -903,7 +903,7 @@ function Setup(p: {
               </>
             ) : <>
             <h2>添加你的简历</h2>
-            <p>支持 ResumePilot 一键导入或 PDF 上传；当前使用离线题目与规则复盘。</p>
+            <p>支持 ResumePilot 一键导入或 PDF 上传。当前免费题目只根据岗位和 JD 生成，简历内容暂不参与出题。</p>
             {p.resumeText ? (
               <div className="imported-resume">
                 <span>
@@ -911,7 +911,7 @@ function Setup(p: {
                 </span>
                 <div>
                   <strong>ResumePilot 简历已导入</strong>
-                  <small>个人简介、经历、项目和技能均已就绪</small>
+                  <small>个人简介、经历、项目和技能已导入；当前免费题目暂不使用这些内容</small>
                 </div>
                 <button type="button" onClick={() => p.setResumeText("")}>
                   改用 PDF

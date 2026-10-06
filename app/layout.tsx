@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "EchoHire · AI 面试训练",
-  description: "根据简历与岗位描述生成专属模拟面试，获得可解释的能力分析。",
+  description: "根据目标岗位与职位 JD 生成离线模拟面试题，查看规则复盘与练习记录。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
