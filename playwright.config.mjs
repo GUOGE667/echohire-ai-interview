@@ -16,6 +16,6 @@ export default defineConfig({
     url: "http://localhost:5173",
     reuseExistingServer: true,
     timeout: 120_000,
-    env: { OPENAI_API_KEY: "" },
+    env: { OPENAI_API_KEY: "", ECHOHIRE_ALLOW_PAID_API: "false" },
   },
 });

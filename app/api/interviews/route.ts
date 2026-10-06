@@ -13,12 +13,6 @@ import { fallbackFollowUp } from "../../../lib/follow-up";
 import { analyzeInterview, decideFollowUp, fallbackAnalysis, generateInterviewQuestions } from "../../../lib/openai";
 import { ApiError, errorResponse } from "../_lib";
 
-function requireUser(request: Request) {
-  const user = getSiteUser(request);
-  if (!user) throw new ApiError("请先登录后再使用面试训练。", 401);
-  return user;
-}
-
 function buildQuestions(role: string, jd: string) {
   const text = jd.toLowerCase();
   const topic = text.includes("react") ? "React" : text.includes("python") ? "Python" : text.includes("java") ? "Java" : text.includes("数据") ? "数据分析" : "核心专业能力";
@@ -32,7 +26,8 @@ function buildQuestions(role: string, jd: string) {
 
 export async function GET(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = getSiteUser(request);
+    if (!user) return Response.json({ interviews: [], storage: "local" });
     const db = await tryGetD1();
     if (!db) return Response.json({ interviews: [], storage: "local" });
     await ensureUser(db, user);
@@ -44,7 +39,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = getSiteUser(request);
     const form = await request.formData();
     const file = form.get("file");
     const resumeText = String(form.get("resumeText") ?? "").trim();
@@ -53,25 +48,31 @@ export async function POST(request: Request) {
     const interviewType = String(form.get("interviewType") ?? "综合面试");
     const difficulty = String(form.get("difficulty") ?? "中级");
     const hasPdf = file instanceof File && file.size > 0;
-    if (!hasPdf && resumeText.length < 20) throw new ApiError("请上传 PDF 简历，或从 ResumePilot 导入简历。", 400);
+    if (user && !hasPdf && resumeText.length < 20) throw new ApiError("请上传 PDF 简历，或从 ResumePilot 导入简历。", 400);
     if (hasPdf && file.type !== "application/pdf") throw new ApiError("请选择一份 PDF 简历。", 400);
     if (hasPdf && file.size > 5 * 1024 * 1024) throw new ApiError("PDF 不能超过 5MB。", 400);
     if (!role || jd.length < 20) throw new ApiError("请填写目标岗位和至少 20 字的职位描述。", 400);
+    if (role.length > 120 || jd.length > 6000 || resumeText.length > 15000 ||
+        interviewType.length > 80 || difficulty.length > 80) {
+      throw new ApiError("填写内容过长，请适当精简后重试。", 400);
+    }
 
     let questions = buildQuestions(role, jd);
     let aiStatus = "fallback";
     let aiModel: string | null = null;
-    try {
-      const generated = await generateInterviewQuestions({
-        role, jd, interviewType, difficulty,
-        resume: hasPdf ? { name: file.name, bytes: await file.arrayBuffer() } : undefined,
-        resumeText: resumeText || undefined,
-      });
-      questions = generated.data.questions;
-      aiStatus = "generated";
-      aiModel = generated.model;
-    } catch (error) {
-      console.warn("AI question generation fallback", error instanceof Error ? error.message : error);
+    if (user && process.env.ECHOHIRE_ALLOW_PAID_API === "true") {
+      try {
+        const generated = await generateInterviewQuestions({
+          role, jd, interviewType, difficulty,
+          resume: hasPdf ? { name: file.name, bytes: await file.arrayBuffer() } : undefined,
+          resumeText: resumeText || undefined,
+        });
+        questions = generated.data.questions;
+        aiStatus = "generated";
+        aiModel = generated.model;
+      } catch (error) {
+        console.warn("AI question generation fallback", error instanceof Error ? error.message : error);
+      }
     }
 
     const now = new Date().toISOString();
@@ -80,8 +81,8 @@ export async function POST(request: Request) {
       status: "in_progress", questions, answers: [], analysis: null,
       aiStatus, aiModel, score: null, createdAt: now, updatedAt: now,
     };
-    const db = await tryGetD1();
-    if (db) {
+    const db = user ? await tryGetD1() : null;
+    if (db && user) {
       await ensureUser(db, user);
       await persistInterview(db, user.userId, interview);
     }
@@ -93,22 +94,26 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = getSiteUser(request);
     const body = await request.json() as {
       id?: string; role?: string; jobDescription?: string; questions?: string[];
-      answers?: string[]; complete?: boolean;
+      answers?: string[]; complete?: boolean; aiStatus?: string;
     };
     if (!body.id || !Array.isArray(body.answers) || !body.answers.every((answer) => typeof answer === "string")) {
       throw new ApiError("面试记录格式无效。", 400);
     }
 
-    const db = await tryGetD1();
-    const stored = db ? await getInterview(db, user.userId, body.id) : null;
+    const db = user ? await tryGetD1() : null;
+    const stored = db && user ? await getInterview(db, user.userId, body.id) : null;
     if (db && !stored) throw new ApiError("没有找到这场面试。", 404);
     const role = stored?.role || body.role;
     const jd = stored?.jobDescription || body.jobDescription;
     const questions = stored?.questions || body.questions;
     if (!role || !jd || !Array.isArray(questions) || !questions.length) throw new ApiError("没有找到这场面试。", 404);
+    if (role.length > 120 || jd.length > 6000 || questions.length > 6 ||
+        questions.some((question) => typeof question !== "string" || question.length > 500) ||
+        body.answers.length > 6) throw new ApiError("面试记录格式无效。", 400);
+    const currentAiStatus = stored?.aiStatus || (body.aiStatus === "generated" ? "generated" : "fallback");
     if (stored && body.answers.length === stored.answers.length && body.answers.every((answer, index) => answer === stored.answers[index])) {
       return Response.json({ saved: true, questions, score: stored.score, analysis: stored.analysis, aiStatus: stored.aiStatus, storage: "cloud" });
     }
@@ -130,29 +135,34 @@ export async function PATCH(request: Request) {
       const followUpCount = questions.filter((question) => question.startsWith("追问：")).length;
       if (followUpCount < 2) {
         let followUp: string | null = null;
-        try {
-          followUp = await decideFollowUp({ jobDescription: jd, question: questions[answerIndex], answer: submittedAnswer });
-        } catch (error) {
-          console.warn("AI follow-up fallback", error instanceof Error ? error.message : error);
+        if (user && process.env.ECHOHIRE_ALLOW_PAID_API === "true") {
+          try {
+            followUp = await decideFollowUp({ jobDescription: jd, question: questions[answerIndex], answer: submittedAnswer });
+          } catch (error) {
+            console.warn("AI follow-up fallback", error instanceof Error ? error.message : error);
+            followUp = fallbackFollowUp({ question: questions[answerIndex], answer: submittedAnswer });
+          }
+        } else {
           followUp = fallbackFollowUp({ question: questions[answerIndex], answer: submittedAnswer });
         }
         if (followUp) updatedQuestions[answerIndex + 1] = followUp;
       }
-      if (db) await saveInterviewProgress(db, user.userId, body.id, updatedQuestions, answers, false, null, stored?.aiStatus || "generated");
-      return Response.json({ saved: true, questions: updatedQuestions, score: null, analysis: null, aiStatus: stored?.aiStatus || "generated", storage: db ? "cloud" : "local" });
+      if (db && user) await saveInterviewProgress(db, user.userId, body.id, updatedQuestions, answers, false, null, currentAiStatus);
+      return Response.json({ saved: true, questions: updatedQuestions, score: null, analysis: null, aiStatus: currentAiStatus, storage: db ? "cloud" : "local" });
     }
 
-    let analysis;
-    let aiStatus = "analyzed";
-    try {
-      const result = await analyzeInterview({ role, jd, questions, answers });
-      analysis = result.data;
-    } catch (error) {
-      console.warn("AI analysis fallback", error instanceof Error ? error.message : error);
-      analysis = fallbackAnalysis(questions, answers);
-      aiStatus = "fallback";
+    let analysis = fallbackAnalysis(questions, answers);
+    let aiStatus = "fallback";
+    if (user && process.env.ECHOHIRE_ALLOW_PAID_API === "true") {
+      try {
+        const result = await analyzeInterview({ role, jd, questions, answers });
+        analysis = result.data;
+        aiStatus = "analyzed";
+      } catch (error) {
+        console.warn("AI analysis fallback", error instanceof Error ? error.message : error);
+      }
     }
-    if (db) {
+    if (db && user) {
       await saveInterviewProgress(db, user.userId, body.id, questions, answers, true, analysis, aiStatus);
       await saveSkillMemory(db, user.userId, body.id, analysis);
     }

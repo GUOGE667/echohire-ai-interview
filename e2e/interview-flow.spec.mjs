@@ -91,7 +91,7 @@ test("创建面试、逐题保存、刷新恢复并查看报告", async ({ page 
   await page.getByRole("textbox", { name: "你的回答" }).fill(answers[0]);
   await page.getByRole("button", { name: "提交并保存" }).click();
   await expect(page.getByRole("heading", { name: questions[1] })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews") || "[]")[0]?.answers.length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:e2e") || "[]")[0]?.answers.length)).toBe(1);
 
   await page.reload();
   await expect(page.getByRole("heading", { name: questions[1] })).toBeVisible();
@@ -106,7 +106,53 @@ test("创建面试、逐题保存、刷新恢复并查看报告", async ({ page 
   await expect(page.getByText("逐题复盘")).toBeVisible();
   await expect(page.locator(".feedback-card")).toHaveCount(4);
   await expect(page.locator(".report-score-number strong")).toHaveText("82");
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews") || "[]")[0]?.status)).toBe("completed");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:e2e") || "[]")[0]?.status)).toBe("completed");
   expect(apiCalls.filter((call) => call === "PATCH /api/interviews")).toHaveLength(4);
   expect(unexpectedRequests).toEqual([]);
+});
+
+test("访客无需登录，可完成真实本地 API 面试并刷新恢复", async ({ page }) => {
+  const outsideRequests = [];
+  await page.route("**/*", async (route) => {
+    if (new URL(route.request().url()).origin !== "http://localhost:5173") {
+      outsideRequests.push(route.request().url());
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await expect(page.getByText("访客模式 · 本机保存")).toBeVisible();
+  const session = await page.request.get("/api/session");
+  expect((await session.json()).user).toBeNull();
+  await page.getByRole("button", { name: "开始新面试" }).click();
+  await expect(page.getByText("无需登录即可练习")).toBeVisible();
+  await page.getByRole("button", { name: "继续" }).click();
+  await page.getByRole("textbox", { name: "职位 JD" }).fill("负责前端产品开发，能够完成需求分析、React 组件设计、团队协作、测试和交付。");
+  await page.getByRole("button", { name: "继续" }).click();
+  await expect(page.getByRole("textbox", { name: "数据保存" })).toHaveValue("仅当前浏览器保存");
+  await page.getByRole("button", { name: "生成面试" }).click();
+  await expect(page.getByText("1 / 4")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:guest") || "[]").length)).toBe(1);
+  const initial = await page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:guest") || "[]"));
+  expect(initial).toHaveLength(1);
+  expect(initial[0].aiStatus).toBe("fallback");
+  expect(initial[0].questions).toHaveLength(4);
+
+  await page.getByRole("textbox", { name: "你的回答" }).fill(answers[0]);
+  await page.getByRole("button", { name: "提交并保存" }).click();
+  await expect(page.getByText("2 / 4")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("2 / 4")).toBeVisible();
+  for (let index = 1; index < 4; index += 1) {
+    await page.getByRole("textbox", { name: "你的回答" }).fill(answers[index]);
+    await page.getByRole("button", { name: "提交并保存" }).click();
+    if (index < 3) await expect(page.getByText(`${index + 2} / 4`)).toBeVisible();
+  }
+  await expect(page.getByText("逐题复盘")).toBeVisible();
+  const completed = await page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:guest") || "[]"));
+  expect(completed[0].status).toBe("completed");
+  expect(completed[0].analysis.source).toBe("fallback");
+  expect(outsideRequests).toEqual([]);
 });

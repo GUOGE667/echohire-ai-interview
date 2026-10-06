@@ -32,6 +32,9 @@ type OpenAIResponse = {
 };
 
 async function createResponse(body:Record<string,unknown>):Promise<OpenAIResponse>{
+  // Public visitors must never spend the owner's API quota. Paid calls stay
+  // disabled until the owner explicitly opts in through a separate setting.
+  if(process.env.ECHOHIRE_ALLOW_PAID_API!=="true")throw new Error("PAID_API_DISABLED");
   const apiKey=process.env.OPENAI_API_KEY;
   if(!apiKey)throw new Error("OPENAI_API_KEY_UNAVAILABLE");
   const response=await fetch("https://api.openai.com/v1/responses",{

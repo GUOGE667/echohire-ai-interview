@@ -26,9 +26,5 @@ export function getSiteUser(request: Request): SiteUser | null {
     };
   }
 
-  const hostname = new URL(request.url).hostname;
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return { userId: "local-development-user", displayName: "本地同学", email: "本地预览" };
-  }
   return null;
 }

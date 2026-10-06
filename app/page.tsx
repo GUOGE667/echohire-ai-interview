@@ -143,6 +143,7 @@ export default function HomePage() {
   const [profiles, setProfiles] = useState<SkillProfile[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [storageMode, setStorageMode] = useState<"cloud" | "local">("local");
+  const [recordKey, setRecordKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -150,14 +151,16 @@ export default function HomePage() {
   useEffect(() => {
     const hash = window.location.hash.replace("#", "").split("?")[0] as View;
     const hasHandoff = window.location.hash.includes("handoff=");
-    api<{ user: User; storage: "cloud" | "local" }>("/api/session")
+    api<{ user: User | null; storage: "cloud" | "local" }>("/api/session")
       .then(async (session) => {
         if (!hasHandoff && ["dashboard", "career", "setup", "interview", "report", "history", "analytics"].includes(hash)) {
           setView(hash);
         }
         setUser(session.user);
         setStorageMode(session.storage);
-        const saved = localStorage.getItem("echohire-interviews");
+        const key = `echohire-interviews:${session.user?.userId || "guest"}`;
+        setRecordKey(key);
+        const saved = localStorage.getItem(key);
         const localRecords = saved
           ? (JSON.parse(saved) as InterviewRecord[])
           : [];
@@ -194,9 +197,9 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
-    if (!loading)
-      localStorage.setItem("echohire-interviews", JSON.stringify(records));
-  }, [records, loading]);
+    if (!loading && recordKey)
+      localStorage.setItem(recordKey, JSON.stringify(records));
+  }, [records, loading, recordKey]);
   useEffect(() => {
     const query = window.location.hash.split("?")[1];
     if (!query) return;
@@ -304,13 +307,13 @@ export default function HomePage() {
     go(record.status === "completed" ? "report" : "interview", record.id);
   }
   async function createInterview() {
-    if (!resumeFile && !resumeText) return;
+    if (user && !resumeFile && !resumeText) return;
     setSaving(true);
     setError("");
     try {
       const form = new FormData();
-      if (resumeFile) form.append("file", resumeFile);
-      if (resumeText) form.append("resumeText", resumeText);
+      if (user && resumeFile) form.append("file", resumeFile);
+      if (user && resumeText) form.append("resumeText", resumeText);
       form.append("role", role);
       form.append("jobDescription", jd);
       form.append("interviewType", interviewType);
@@ -353,6 +356,7 @@ export default function HomePage() {
           questions: active.questions,
           answers,
           complete,
+          aiStatus: active.aiStatus,
         }),
       });
       const updated = {
@@ -387,7 +391,7 @@ export default function HomePage() {
   }
 
   const latest = active ?? records[0] ?? null;
-  const displayName = user?.displayName?.split(/[\s@]/)[0] || "同学";
+  const displayName = user?.displayName?.split(/[\s@]/)[0] || "访客";
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <div className="app-shell">
@@ -419,7 +423,7 @@ export default function HomePage() {
               <span className="avatar">{displayName.slice(0, 1)}</span>
               <span>
                 <strong>{displayName}</strong>
-                <small>{user?.email || "数据同步中"}</small>
+                <small>{user?.email || "访客模式 · 本机保存"}</small>
               </span>
             </div>
             <button className="icon-button" aria-label="个人资料">
@@ -459,6 +463,8 @@ export default function HomePage() {
               )}{" "}
               {view === "setup" && (
                 <Setup
+                  guestMode={!user}
+                  storageMode={storageMode}
                   step={step}
                   setStep={setStep}
                   resumeFile={resumeFile}
@@ -500,6 +506,7 @@ export default function HomePage() {
               )}{" "}
               {view === "history" && (
                 <HistoryView
+                  storageMode={storageMode}
                   records={records}
                   onOpen={openRecord}
                   onStart={() => go("setup")}
@@ -541,7 +548,7 @@ function Empty({
     <div className="empty-state">
       <BrainCircuit size={30} />
       <h2>{title}</h2>
-      <p>完成的训练会安全保存在你的账户档案中。</p>
+      <p>完成训练后，可在当前浏览器查看复盘记录。</p>
       <button className="primary-button" onClick={onAction}>
         <Plus size={16} />
         {action}
@@ -613,7 +620,7 @@ function CareerJourney({
           <span className="career-step-index">02</span>
           <Mic2 size={22} />
           <h2>模拟面试</h2>
-          <p>{inProgress ? `正在训练「${inProgress.role}」，进度已云端保存。` : completed ? `已完成 ${records.filter((record) => record.status === "completed").length} 场，可继续练习。` : "把简历带入 EchoHire，练习岗位问题并保存回答。"}</p>
+          <p>{inProgress ? `正在训练「${inProgress.role}」，进度已保存，可继续练习。` : completed ? `已完成 ${records.filter((record) => record.status === "completed").length} 场，可继续练习。` : "选择目标岗位，练习岗位问题并保存回答。"}</p>
           <button onClick={inProgress ? () => onOpen(inProgress) : onStart}>{inProgress ? "继续当前面试" : "开始新面试"} <ChevronRight size={16} /></button>
         </article>
         <article>
@@ -677,7 +684,7 @@ function Dashboard({
       <header className="topbar">
         <div>
           <p className="eyebrow">
-            今日训练 · {storageMode === "cloud" ? "账户云端同步" : "本地安全保存"}
+            今日训练 · {storageMode === "cloud" ? "账户云端同步" : "仅当前浏览器保存"}
           </p>
           <h1>准备好再进一步了吗？</h1>
         </div>
@@ -714,13 +721,13 @@ function Dashboard({
               </span>
               <h3>
                 {average
-                  ? "你的每一次回答都已进入长期档案"
+                  ? storageMode === "cloud" ? "你的回答已进入账户档案" : "训练记录保存在当前浏览器"
                   : "完成第一场面试，建立能力基线"}
               </h3>
               <p>
                 {storageMode === "cloud"
                   ? "岗位、答题进度和能力变化已进入你的长期档案。"
-                  : "当前为本地预览，数据同时保留在浏览器中。"}
+                  : "记录仅保存在当前浏览器；清除网站数据或换设备后无法恢复。"}
               </p>
               {recent && (
                 <button className="text-button" onClick={() => onOpen(recent)}>
@@ -789,7 +796,7 @@ function Dashboard({
             </div>
           ) : (
             <p className="muted-copy">
-              上传简历和职位描述，开始第一场专属训练。
+              填写目标岗位和职位描述，开始第一场训练。
             </p>
           )}
         </article>
@@ -833,6 +840,8 @@ function Dashboard({
 }
 
 function Setup(p: {
+  guestMode: boolean;
+  storageMode: "cloud" | "local";
   step: number;
   setStep: (n: number) => void;
   resumeFile: File | null;
@@ -852,12 +861,12 @@ function Setup(p: {
 }) {
   const canNext =
     p.step === 1
-      ? !!p.resumeFile || !!p.resumeText
+      ? p.guestMode || !!p.resumeFile || !!p.resumeText
       : p.step === 2
         ? p.jd.trim().length >= 20
         : !!p.role.trim() &&
           p.jd.trim().length >= 20 &&
-          !!(p.resumeFile || p.resumeText);
+          (p.guestMode || !!(p.resumeFile || p.resumeText));
   return (
     <div className="flow-page">
       <header className="flow-header">
@@ -868,7 +877,7 @@ function Setup(p: {
         <span className="step-count">{p.step} / 3</span>
       </header>
       <div className="stepper">
-        {["添加简历", "粘贴职位", "面试设置"].map((item, index) => (
+        {(p.guestMode ? ["访客说明", "粘贴职位", "面试设置"] : ["添加简历", "粘贴职位", "面试设置"]).map((item, index) => (
           <div key={item} className={index + 1 <= p.step ? "done" : ""}>
             <span>{index + 1 < p.step ? <Check size={14} /> : index + 1}</span>
             <small>{item}</small>
@@ -881,10 +890,14 @@ function Setup(p: {
             <span className="section-icon">
               <Paperclip size={21} />
             </span>
+            {p.guestMode ? (
+              <>
+                <h2>无需登录即可练习</h2>
+                <p>访客模式根据目标岗位和职位描述生成离线题目与规则复盘。无需上传简历，也不会调用付费模型。训练记录只保存在当前浏览器。</p>
+              </>
+            ) : <>
             <h2>添加你的简历</h2>
-            <p>
-              支持 ResumePilot 一键导入或 PDF 上传，仅在生成本次面试问题时处理。
-            </p>
+            <p>支持 ResumePilot 一键导入或 PDF 上传；当前使用离线题目与规则复盘。</p>
             {p.resumeText ? (
               <div className="imported-resume">
                 <span>
@@ -913,18 +926,19 @@ function Setup(p: {
                     <strong>{p.resumeFile.name}</strong>
                     <small>
                       {(p.resumeFile.size / 1024 / 1024).toFixed(2)} MB ·
-                      待用于本次生成
+                      已选择 PDF
                     </small>
                   </>
                 ) : (
                   <>
                     <Paperclip size={28} />
                     <strong>选择 PDF 简历</strong>
-                    <small>仅用于生成本次面试</small>
+                    <small>当前离线模式不解析 PDF 内容</small>
                   </>
                 )}
               </label>
             )}
+            </>}
           </div>
         )}
         {p.step === 2 && (
@@ -952,14 +966,16 @@ function Setup(p: {
             </span>
             <h2>设置面试方式</h2>
             <p>
-              {p.resumeText
-                ? "ResumePilot 简历与职位 JD 已自动带入，请确认设置后开始。"
-                : "AI 将结合简历与职位要求生成问题，回答会在每题提交后自动保存。"}
+              {p.guestMode
+                ? "离线规则根据目标岗位和 JD 生成题目；每题回答只保存在此浏览器。"
+                : p.resumeText
+                ? "ResumePilot 简历与职位 JD 已自动带入；当前离线模式只根据岗位和 JD 生成题目。"
+                : "根据职位要求生成离线题目，回答会在每题提交后自动保存。"}
             </p>
             {p.resumeText && (
               <div className="handoff-note">
                 <Check size={16} />
-                已连接 ResumePilot · 简历和 JD 均已就绪
+                已连接 ResumePilot · 当前离线题目不使用简历内容
               </div>
             )}
             <div className="field-grid">
@@ -994,13 +1010,13 @@ function Setup(p: {
               </label>
               <label className="field-label">
                 数据保存
-                <input value="账户云端保存" readOnly />
+                <input value={p.storageMode === "cloud" ? "账户云端保存" : "仅当前浏览器保存"} readOnly />
               </label>
             </div>
             <div className="tag-row">
-              <span>AI 岗位定制</span>
+              <span>离线岗位题目</span>
               <span>逐题复盘</span>
-              <span>简历不留存</span>
+              <span>不保存 PDF 文件</span>
               <span>能力档案</span>
             </div>
           </div>
@@ -1025,7 +1041,7 @@ function Setup(p: {
             {p.saving ? (
               <>
                 <LoaderCircle className="spin-icon" size={16} />
-                AI 正在准备
+                正在准备题目
               </>
             ) : (
               <>
@@ -1355,10 +1371,12 @@ function Report({
 
 function HistoryView({
   records,
+  storageMode,
   onOpen,
   onStart,
 }: {
   records: InterviewRecord[];
+  storageMode: "cloud" | "local";
   onOpen: (r: InterviewRecord) => void;
   onStart: () => void;
 }) {
@@ -1366,7 +1384,7 @@ function HistoryView({
     <div className="flow-page">
       <header className="topbar">
         <div>
-          <p className="eyebrow">账户训练档案</p>
+          <p className="eyebrow">{storageMode === "cloud" ? "账户训练档案" : "当前浏览器训练档案"}</p>
           <h1>历史面试</h1>
         </div>
         <button className="primary-button" onClick={onStart}>
