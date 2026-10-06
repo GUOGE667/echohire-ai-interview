@@ -320,7 +320,13 @@ export default function HomePage() {
       form.append("difficulty", difficulty);
       const result = await api<{ interview: InterviewRecord }>(
         "/api/interviews",
-        { method: "POST", body: form },
+        user
+          ? { method: "POST", body: form }
+          : {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ role, jobDescription: jd, interviewType, difficulty }),
+            },
       );
       setActive(result.interview);
       setRecords((items) => [result.interview, ...items]);

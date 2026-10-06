@@ -40,17 +40,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = getSiteUser(request);
-    const form = await request.formData();
-    const file = form.get("file");
-    const resumeText = String(form.get("resumeText") ?? "").trim();
-    const role = String(form.get("role") ?? "").trim();
-    const jd = String(form.get("jobDescription") ?? "").trim();
-    const interviewType = String(form.get("interviewType") ?? "综合面试");
-    const difficulty = String(form.get("difficulty") ?? "中级");
-    const hasPdf = file instanceof File && file.size > 0;
+    const json = request.headers.get("content-type")?.includes("application/json")
+      ? await request.json() as Record<string, unknown>
+      : null;
+    const form = json ? null : await request.formData();
+    const field = (name: string) => json ? json[name] : form?.get(name);
+    const file = form?.get("file");
+    const pdf = typeof File !== "undefined" && file instanceof File ? file : null;
+    const resumeText = String(field("resumeText") ?? "").trim();
+    const role = String(field("role") ?? "").trim();
+    const jd = String(field("jobDescription") ?? "").trim();
+    const interviewType = String(field("interviewType") ?? "综合面试");
+    const difficulty = String(field("difficulty") ?? "中级");
+    const hasPdf = !!pdf && pdf.size > 0;
     if (user && !hasPdf && resumeText.length < 20) throw new ApiError("请上传 PDF 简历，或从 ResumePilot 导入简历。", 400);
-    if (hasPdf && file.type !== "application/pdf") throw new ApiError("请选择一份 PDF 简历。", 400);
-    if (hasPdf && file.size > 5 * 1024 * 1024) throw new ApiError("PDF 不能超过 5MB。", 400);
+    if (hasPdf && pdf.type !== "application/pdf") throw new ApiError("请选择一份 PDF 简历。", 400);
+    if (hasPdf && pdf.size > 5 * 1024 * 1024) throw new ApiError("PDF 不能超过 5MB。", 400);
     if (!role || jd.length < 20) throw new ApiError("请填写目标岗位和至少 20 字的职位描述。", 400);
     if (role.length > 120 || jd.length > 6000 || resumeText.length > 15000 ||
         interviewType.length > 80 || difficulty.length > 80) {
@@ -64,7 +69,7 @@ export async function POST(request: Request) {
       try {
         const generated = await generateInterviewQuestions({
           role, jd, interviewType, difficulty,
-          resume: hasPdf ? { name: file.name, bytes: await file.arrayBuffer() } : undefined,
+          resume: hasPdf ? { name: pdf.name, bytes: await pdf.arrayBuffer() } : undefined,
           resumeText: resumeText || undefined,
         });
         questions = generated.data.questions;
