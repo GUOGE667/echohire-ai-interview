@@ -17,7 +17,7 @@ function buildQuestions(role: string, jd: string) {
   const text = jd.toLowerCase();
   const topic = text.includes("react") ? "React" : text.includes("python") ? "Python" : text.includes("java") ? "Java" : text.includes("数据") ? "数据分析" : "核心专业能力";
   return [
-    `请结合简历介绍一个最能证明你胜任${role}的项目。你承担了什么，结果如何？`,
+    `请介绍一个最能证明你胜任${role}的项目。你承担了什么，结果如何？`,
     `这个岗位强调${topic}。请讲一次你解决相关复杂问题的完整过程和技术取舍。`,
     "如果入职后发现需求目标与现有实现冲突，你会如何和产品、设计或工程团队推进？",
     "回顾一个结果不如预期的项目。你如何复盘，并把教训应用到下一次交付中？",

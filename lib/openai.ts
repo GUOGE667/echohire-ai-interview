@@ -306,7 +306,7 @@ export function fallbackAnalysis(questions:string[],answers:string[]):InterviewA
     questionFeedback,
     agentTrace:[
       {tool:"inspect_interview_context",title:"检查岗位与回答证据",summary:`已在本地检查 ${questions.length} 道回答的结构、行动、结果和证据信号。`,status:"fallback"},
-      {tool:"generate_rule_based_report",title:"生成可靠备用报告",summary:"AI 暂时不可用，已使用内容规则生成逐题建议，训练流程未中断。",status:"fallback"},
+      {tool:"generate_rule_based_report",title:"生成离线规则报告",summary:"本次使用内容规则生成逐题建议。",status:"fallback"},
     ],
   };
 }
