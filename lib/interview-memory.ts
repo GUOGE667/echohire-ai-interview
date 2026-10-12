@@ -1,4 +1,5 @@
 import type { InterviewAnalysis } from "./openai";
+import { normalizeQuestionEvidence, type QuestionEvidence } from "./resume-questions.ts";
 
 export type StoredInterview = {
   id: string;
@@ -8,6 +9,7 @@ export type StoredInterview = {
   difficulty: string;
   status: string;
   questions: string[];
+  questionEvidence?: Array<QuestionEvidence | null>;
   answers: string[];
   analysis: InterviewAnalysis | null;
   aiStatus: string;
@@ -44,6 +46,12 @@ function parseJson<T>(value: string | null, fallback: T): T {
 }
 
 function mapInterview(row: InterviewRow): StoredInterview {
+  const savedQuestions = parseJson<unknown>(row.questions_json, []);
+  const questions = Array.isArray(savedQuestions) ? savedQuestions as string[] :
+    (savedQuestions && typeof savedQuestions === "object" && "questions" in savedQuestions &&
+      Array.isArray(savedQuestions.questions) ? savedQuestions.questions as string[] : []);
+  const evidence = !Array.isArray(savedQuestions) && savedQuestions && typeof savedQuestions === "object" &&
+    "questionEvidence" in savedQuestions ? savedQuestions.questionEvidence : null;
   return {
     id: row.id,
     role: row.role,
@@ -51,7 +59,8 @@ function mapInterview(row: InterviewRow): StoredInterview {
     interviewType: row.interview_type,
     difficulty: row.difficulty,
     status: row.status,
-    questions: parseJson<string[]>(row.questions_json, []),
+    questions,
+    questionEvidence: normalizeQuestionEvidence(evidence, questions.length),
     answers: parseJson<string[]>(row.answers_json, []),
     analysis: parseJson<InterviewAnalysis | null>(row.analysis_json, null),
     aiStatus: row.ai_status,
@@ -104,7 +113,7 @@ export async function createInterview(db: D1Database, userId: string, interview:
   `).bind(
     interview.id, userId, interview.role, interview.jobDescription,
     interview.interviewType, interview.difficulty, interview.status,
-    JSON.stringify(interview.questions), JSON.stringify(interview.answers), null,
+    JSON.stringify({ questions: interview.questions, questionEvidence: normalizeQuestionEvidence(interview.questionEvidence, interview.questions.length) }), JSON.stringify(interview.answers), null,
     interview.aiStatus, interview.aiModel, null, interview.createdAt, interview.updatedAt,
   ).run();
 }
@@ -118,6 +127,7 @@ export async function saveInterviewProgress(
   completed: boolean,
   analysis: InterviewAnalysis | null,
   aiStatus: string,
+  questionEvidence: Array<QuestionEvidence | null>,
 ) {
   const now = new Date().toISOString();
   await db.prepare(`
@@ -125,7 +135,7 @@ export async function saveInterviewProgress(
     SET questions_json = ?, answers_json = ?, status = ?, analysis_json = ?, ai_status = ?, score = ?, updated_at = ?
     WHERE user_id = ? AND id = ?
   `).bind(
-    JSON.stringify(questions), JSON.stringify(answers), completed ? "completed" : "in_progress",
+    JSON.stringify({ questions, questionEvidence: normalizeQuestionEvidence(questionEvidence, questions.length) }), JSON.stringify(answers), completed ? "completed" : "in_progress",
     analysis ? JSON.stringify(analysis) : null, aiStatus,
     analysis?.overallScore ?? null, now, userId, id,
   ).run();

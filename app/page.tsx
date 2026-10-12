@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { QuestionEvidence } from "../lib/resume-questions";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -68,6 +69,7 @@ type InterviewRecord = {
   difficulty: string;
   status: string;
   questions: string[];
+  questionEvidence?: Array<QuestionEvidence | null>;
   answers: string[];
   analysis: Analysis | null;
   aiStatus: string;
@@ -325,7 +327,7 @@ export default function HomePage() {
           : {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ role, jobDescription: jd, interviewType, difficulty }),
+              body: JSON.stringify({ role, jobDescription: jd, interviewType, difficulty, resumeText }),
             },
       );
       setActive(result.interview);
@@ -349,6 +351,7 @@ export default function HomePage() {
     try {
       const saved = await api<{
         questions: string[];
+        questionEvidence: Array<QuestionEvidence | null>;
         score: number | null;
         analysis: Analysis | null;
         aiStatus: string;
@@ -360,6 +363,7 @@ export default function HomePage() {
           role: active.role,
           jobDescription: active.jobDescription,
           questions: active.questions,
+          questionEvidence: active.questionEvidence,
           answers,
           complete,
           aiStatus: active.aiStatus,
@@ -368,6 +372,7 @@ export default function HomePage() {
       const updated = {
         ...active,
         questions: saved.questions,
+        questionEvidence: saved.questionEvidence,
         answers,
         status: complete ? "completed" : "in_progress",
         score: saved.score,
@@ -899,11 +904,11 @@ function Setup(p: {
             {p.guestMode ? (
               <>
                 <h2>无需登录即可练习</h2>
-                <p>访客模式根据目标岗位和职位描述生成离线题目与规则复盘。无需上传简历，也不会调用付费模型。训练记录只保存在当前浏览器。</p>
+                <p>访客模式根据目标岗位和职位描述生成离线题目与规则复盘；如果从 ResumePilot 导入简历，会尝试加入有原文依据的定制问题。无需上传简历，也不会调用付费模型。训练记录只保存在当前浏览器。</p>
               </>
             ) : <>
             <h2>添加你的简历</h2>
-            <p>支持 ResumePilot 一键导入或 PDF 上传。当前免费题目只根据岗位和 JD 生成，简历内容暂不参与出题。</p>
+            <p>支持 ResumePilot 一键导入或 PDF 上传。导入的项目、实习文字可用于生成最多两道有原文依据的离线题目；当前离线模式不解析 PDF 内容。</p>
             {p.resumeText ? (
               <div className="imported-resume">
                 <span>
@@ -911,7 +916,7 @@ function Setup(p: {
                 </span>
                 <div>
                   <strong>ResumePilot 简历已导入</strong>
-                  <small>个人简介、经历、项目和技能已导入；当前免费题目暂不使用这些内容</small>
+                  <small>个人简介、经历、项目和技能已导入；有具体项目或实习描述时会尝试定制问题</small>
                 </div>
                 <button type="button" onClick={() => p.setResumeText("")}>
                   改用 PDF
@@ -975,13 +980,13 @@ function Setup(p: {
               {p.guestMode
                 ? "离线规则根据目标岗位和 JD 生成题目；每题回答只保存在此浏览器。"
                 : p.resumeText
-                ? "ResumePilot 简历与职位 JD 已自动带入；当前离线模式只根据岗位和 JD 生成题目。"
+                ? "ResumePilot 简历与职位 JD 已自动带入；离线模式会尝试从项目和实习描述中生成有原文依据的问题。"
                 : "根据职位要求生成离线题目，回答会在每题提交后自动保存。"}
             </p>
             {p.resumeText && (
               <div className="handoff-note">
                 <Check size={16} />
-                已连接 ResumePilot · 当前离线题目不使用简历内容
+                已连接 ResumePilot · 最多两道简历定制题将显示引用原文
               </div>
             )}
             <div className="field-grid">
@@ -1135,6 +1140,12 @@ function Interview({
             <div>
               <span>岗位面试官</span>
               <h1>{record.questions[questionIndex]}</h1>
+              {record.questionEvidence?.[questionIndex] && (
+                <div className="question-evidence">
+                  <strong>简历依据 · {record.questionEvidence?.[questionIndex]?.section}</strong>
+                  <blockquote>{record.questionEvidence?.[questionIndex]?.excerpt}</blockquote>
+                </div>
+              )}
               <p>请尽量说明背景、你的具体行动以及最终结果。</p>
             </div>
           </div>
@@ -1357,6 +1368,12 @@ function Report({
                     {record.questions[item.questionIndex] ||
                       record.questions[index]}
                   </h3>
+                  {record.questionEvidence?.[item.questionIndex] && (
+                    <div className="question-evidence">
+                      <strong>简历依据 · {record.questionEvidence?.[item.questionIndex]?.section}</strong>
+                      <blockquote>{record.questionEvidence?.[item.questionIndex]?.excerpt}</blockquote>
+                    </div>
+                  )}
                   <p>{item.feedback}</p>
                   <div className="better-answer">
                     <Sparkles size={15} />

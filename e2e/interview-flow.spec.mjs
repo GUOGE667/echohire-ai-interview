@@ -156,3 +156,36 @@ test("访客无需登录，可完成真实本地 API 面试并刷新恢复", asy
   expect(completed[0].analysis.source).toBe("fallback");
   expect(outsideRequests).toEqual([]);
 });
+
+test("ResumePilot 导入生成有原文依据的定制题，刷新后继续显示", async ({ page }) => {
+  const projectDetail = "我负责使用 React 开发简历分类页面，并通过 20 条虚构样本验证展示流程。";
+  const experience = "我参与设计 Python 数据清洗脚本，完成 3 类字段检查并记录错误案例。";
+  const payload = {
+    resume: { name: "虚构候选人", title: "前端工程师", project: "履历台", projectRole: "开发", projectDetail,
+      company: "示例科技", role: "实习生", experience },
+    jobDescription: "负责 React 前端应用与 Python 数据工具开发，能够独立交付需求和测试。",
+  };
+  await page.goto(`/#setup?handoff=${encodeURIComponent(JSON.stringify(payload))}`);
+  await expect(page.getByText("已连接 ResumePilot", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "生成面试" }).click();
+  await expect(page.getByRole("heading", { name: /请结合这段项目经历/ })).toBeVisible();
+  await expect(page.getByText(projectDetail.slice(0, -1))).toBeVisible();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:guest") || "[]"));
+  assertResumeEvidence(saved[0], projectDetail, experience);
+
+  await page.getByRole("textbox", { name: "你的回答" }).fill(answers[0]);
+  await page.getByRole("button", { name: "提交并保存" }).click();
+  await expect(page.getByRole("heading", { name: /请结合这段实习经历/ })).toBeVisible();
+  await expect(page.getByText(experience.slice(0, -1))).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(experience.slice(0, -1))).toBeVisible();
+  const resumed = await page.evaluate(() => JSON.parse(localStorage.getItem("echohire-interviews:guest") || "[]"));
+  assertResumeEvidence(resumed[0], projectDetail, experience);
+});
+
+function assertResumeEvidence(record, projectDetail, experience) {
+  expect(record.questions).toHaveLength(4);
+  expect(record.questionEvidence[0]).toEqual({ section: "项目经历", excerpt: projectDetail.slice(0, -1) });
+  expect(record.questionEvidence[1]).toEqual({ section: "实习经历", excerpt: experience.slice(0, -1) });
+  expect(record.aiStatus).toBe("fallback");
+}

@@ -10,19 +10,9 @@ import {
   type StoredInterview,
 } from "../../../lib/interview-memory";
 import { fallbackFollowUp } from "../../../lib/follow-up";
+import { buildOfflineQuestions, normalizeQuestionEvidence } from "../../../lib/resume-questions";
 import { analyzeInterview, decideFollowUp, fallbackAnalysis, generateInterviewQuestions } from "../../../lib/openai";
 import { ApiError, errorResponse } from "../_lib";
-
-function buildQuestions(role: string, jd: string) {
-  const text = jd.toLowerCase();
-  const topic = text.includes("react") ? "React" : text.includes("python") ? "Python" : text.includes("java") ? "Java" : text.includes("数据") ? "数据分析" : "核心专业能力";
-  return [
-    `请介绍一个最能证明你胜任${role}的项目。你承担了什么，结果如何？`,
-    `这个岗位强调${topic}。请讲一次你解决相关复杂问题的完整过程和技术取舍。`,
-    "如果入职后发现需求目标与现有实现冲突，你会如何和产品、设计或工程团队推进？",
-    "回顾一个结果不如预期的项目。你如何复盘，并把教训应用到下一次交付中？",
-  ];
-}
 
 export async function GET(request: Request) {
   try {
@@ -62,7 +52,9 @@ export async function POST(request: Request) {
       throw new ApiError("填写内容过长，请适当精简后重试。", 400);
     }
 
-    let questions = buildQuestions(role, jd);
+    const offline = buildOfflineQuestions(role, jd, resumeText);
+    let questions = offline.questions;
+    let questionEvidence = offline.questionEvidence;
     let aiStatus = "fallback";
     let aiModel: string | null = null;
     if (user && process.env.ECHOHIRE_ALLOW_PAID_API === "true") {
@@ -73,6 +65,7 @@ export async function POST(request: Request) {
           resumeText: resumeText || undefined,
         });
         questions = generated.data.questions;
+        questionEvidence = normalizeQuestionEvidence(null, questions.length);
         aiStatus = "generated";
         aiModel = generated.model;
       } catch (error) {
@@ -83,7 +76,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const interview: StoredInterview = {
       id: crypto.randomUUID(), role, jobDescription: jd, interviewType, difficulty,
-      status: "in_progress", questions, answers: [], analysis: null,
+      status: "in_progress", questions, questionEvidence, answers: [], analysis: null,
       aiStatus, aiModel, score: null, createdAt: now, updatedAt: now,
     };
     const db = user ? await tryGetD1() : null;
@@ -102,7 +95,7 @@ export async function PATCH(request: Request) {
     const user = getSiteUser(request);
     const body = await request.json() as {
       id?: string; role?: string; jobDescription?: string; questions?: string[];
-      answers?: string[]; complete?: boolean; aiStatus?: string;
+      answers?: string[]; complete?: boolean; aiStatus?: string; questionEvidence?: unknown;
     };
     if (!body.id || !Array.isArray(body.answers) || !body.answers.every((answer) => typeof answer === "string")) {
       throw new ApiError("面试记录格式无效。", 400);
@@ -118,9 +111,10 @@ export async function PATCH(request: Request) {
     if (role.length > 120 || jd.length > 6000 || questions.length > 6 ||
         questions.some((question) => typeof question !== "string" || question.length > 500) ||
         body.answers.length > 6) throw new ApiError("面试记录格式无效。", 400);
+    const questionEvidence = normalizeQuestionEvidence(stored?.questionEvidence ?? body.questionEvidence, questions.length);
     const currentAiStatus = stored?.aiStatus || (body.aiStatus === "generated" ? "generated" : "fallback");
     if (stored && body.answers.length === stored.answers.length && body.answers.every((answer, index) => answer === stored.answers[index])) {
-      return Response.json({ saved: true, questions, score: stored.score, analysis: stored.analysis, aiStatus: stored.aiStatus, storage: "cloud" });
+      return Response.json({ saved: true, questions, questionEvidence, score: stored.score, analysis: stored.analysis, aiStatus: stored.aiStatus, storage: "cloud" });
     }
     if (stored?.status === "completed") throw new ApiError("这场面试已完成。", 409);
     const previousAnswers = stored?.answers ?? body.answers.slice(0, -1);
@@ -137,6 +131,7 @@ export async function PATCH(request: Request) {
 
     if (!complete) {
       const updatedQuestions = [...questions];
+      const updatedEvidence = [...questionEvidence];
       const followUpCount = questions.filter((question) => question.startsWith("追问：")).length;
       if (followUpCount < 2) {
         let followUp: string | null = null;
@@ -150,10 +145,13 @@ export async function PATCH(request: Request) {
         } else {
           followUp = fallbackFollowUp({ question: questions[answerIndex], answer: submittedAnswer });
         }
-        if (followUp) updatedQuestions[answerIndex + 1] = followUp;
+        if (followUp && !updatedEvidence[answerIndex + 1]) {
+          updatedQuestions[answerIndex + 1] = followUp;
+          updatedEvidence[answerIndex + 1] = null;
+        }
       }
-      if (db && user) await saveInterviewProgress(db, user.userId, body.id, updatedQuestions, answers, false, null, currentAiStatus);
-      return Response.json({ saved: true, questions: updatedQuestions, score: null, analysis: null, aiStatus: currentAiStatus, storage: db ? "cloud" : "local" });
+      if (db && user) await saveInterviewProgress(db, user.userId, body.id, updatedQuestions, answers, false, null, currentAiStatus, updatedEvidence);
+      return Response.json({ saved: true, questions: updatedQuestions, questionEvidence: updatedEvidence, score: null, analysis: null, aiStatus: currentAiStatus, storage: db ? "cloud" : "local" });
     }
 
     let analysis = fallbackAnalysis(questions, answers);
@@ -168,10 +166,10 @@ export async function PATCH(request: Request) {
       }
     }
     if (db && user) {
-      await saveInterviewProgress(db, user.userId, body.id, questions, answers, true, analysis, aiStatus);
+      await saveInterviewProgress(db, user.userId, body.id, questions, answers, true, analysis, aiStatus, questionEvidence);
       await saveSkillMemory(db, user.userId, body.id, analysis);
     }
-    return Response.json({ saved: true, questions, score: analysis.overallScore, analysis, aiStatus, storage: db ? "cloud" : "local" });
+    return Response.json({ saved: true, questions, questionEvidence, score: analysis.overallScore, analysis, aiStatus, storage: db ? "cloud" : "local" });
   } catch (error) {
     return errorResponse(error);
   }

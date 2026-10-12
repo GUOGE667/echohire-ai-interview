@@ -4,6 +4,30 @@ import { fallbackFollowUp } from "../lib/follow-up.ts";
 import { fallbackAnalysis } from "../lib/openai.ts";
 import { getSiteUser } from "../lib/identity.ts";
 import { getInterview, saveInterviewProgress } from "../lib/interview-memory.ts";
+import { buildOfflineQuestions, normalizeQuestionEvidence } from "../lib/resume-questions.ts";
+
+test("resume questions quote only supplied project and internship details", () => {
+  const resumeText = [
+    "项目经历：履历台｜前端开发",
+    "我负责使用 React 开发候选人分类页面，并通过 20 条虚构样本验证展示流程。",
+    "实习经历：示例科技｜软件工程实习生",
+    "我参与设计 Python 数据清洗脚本，完成 3 类字段检查并记录错误案例。",
+    "专业技能：React Python",
+  ].join("\n");
+  const { questions, questionEvidence } = buildOfflineQuestions("前端工程师", "负责 React 和 Python 项目开发与团队协作。", resumeText);
+  assert.equal(questions.length, 4);
+  assert.deepEqual(questionEvidence.map((item) => item?.section ?? null), ["项目经历", "实习经历", null, null]);
+  for (const item of questionEvidence.filter(Boolean)) assert.ok(resumeText.includes(item.excerpt));
+  assert.match(questions[0], /项目经历/);
+  assert.match(questions[1], /实习经历/);
+});
+
+test("empty or vague resume falls back to role and JD questions", () => {
+  const baseline = buildOfflineQuestions("前端工程师", "负责 React 组件开发、需求分析与交付。");
+  const vague = buildOfflineQuestions("前端工程师", "负责 React 组件开发、需求分析与交付。", "项目经历：未填写\n实习经历：暂无");
+  assert.deepEqual(vague, baseline);
+  assert.deepEqual(normalizeQuestionEvidence([{ section: "项目经历", excerpt: "虚构" }], 2), [null, null]);
+});
 
 test("empty answers never trigger a follow-up", () => {
   assert.equal(fallbackFollowUp({ question: "介绍项目", answer: "  " }), null);
@@ -73,6 +97,7 @@ test("stored interview JSON restores submitted answers and questions", async () 
   };
   const interview = await getInterview(db, "user-1", "interview-1");
   assert.deepEqual(interview.questions, ["项目经历", "技术取舍"]);
+  assert.deepEqual(interview.questionEvidence, [null, null]);
   assert.deepEqual(interview.answers, ["我负责设计组件"]);
   assert.equal(interview.status, "in_progress");
 });
@@ -90,7 +115,7 @@ test("progress update is scoped to both user and interview", async () => {
       };
     },
   };
-  await saveInterviewProgress(db, "user-1", "interview-1", ["项目经历"], ["我的回答"], false, null, "fallback");
+  await saveInterviewProgress(db, "user-1", "interview-1", ["项目经历"], ["我的回答"], false, null, "fallback", [null]);
   assert.equal(bound[2], "in_progress");
   assert.deepEqual(bound.slice(-2), ["user-1", "interview-1"]);
 });
